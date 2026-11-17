@@ -1,0 +1,48 @@
+paths:
+  data_dir: ./data
+
+devices:
+  ffmpeg: null
+  ffprobe: null
+  nvidia_smi: null
+
+llm:
+  endpoint: http://127.0.0.1:8081/v1
+  api_key: null
+  timeout: 300
+
+asr:
+  model: large-v3-turbo  
+  word_timestamps: true
+  vad_filter: true
+  condition_on_previous_text: false
+
+clips:
+  target_count: 3
+  max_count: 5 
+  min_duration: 15.0
+  max_duration: 75.0
+  overlap_threshold: 0.3
+  hook_overlay_duration: 2.5
+
+faces:
+  detection_fps: 3.0
+  min_detection_confidence: 0.5
+  iou_threshold: 0.5
+
+captions:
+  font: Montserrat ExtraBold
+  font_size: 88
+  margin_v: 450
+  safe_zone_right: 150
+  safe_zone_top: 220
+  max_words_per_group: 4
+  max_chars_per_line: 20  
+  max_lines: 2
+  karaoke_highlight: yellow
+
+render:
+  output_width: 1080
+  output_height: 1920
+  crf: 14
+  encoder: h264_nvenc

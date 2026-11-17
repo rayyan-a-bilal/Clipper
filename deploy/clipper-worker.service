@@ -1,0 +1,14 @@
+[Unit]
+Description=Clipper Worker Process
+After=network.target
+
+[Service]
+Type=simple
+User=clipper
+WorkingDirectory=/opt/clipper
+EnvironmentFile=/etc/clipper.env
+ExecStart=/opt/clipper/.venv/bin/python -m clipper worker
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
