@@ -34,4 +34,4 @@ These will be implemented in future milestones:
 
 ## Next Milestone
 
-The project is ready for M1 development where the actual video processing pipeline will be implemented.
+M0, M1, and M2 (including M2a/M2b) are complete. The last fix in M2 corrected the sentence builder's gap-based splitting (tests/test_sentences.py now passes 6/6). The project is ready for M3 development (Scene analysis).

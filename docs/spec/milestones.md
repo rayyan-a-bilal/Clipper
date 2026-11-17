@@ -16,6 +16,23 @@
 - Metadata extraction
 - Job state management
 
+## M2a - Transcript Foundations (Complete)
+- CPU-only transcript contracts (WordsArtifact, SentencesArtifact)
+- Deterministic sentence building logic with punctuation/gap/sentence duration rules
+- Fixture ASR adapter for testing without GPU or model downloads
+- Stage names: transcribe and sentences
+
+## M2b - Real ASR Adapter and Transcription Stages (Complete)
+- FasterWhisperASR adapter with lazy loading from config  
+- get_adapter() factory function
+- Stage implementation: transcribe and sentences
+- Manual transcription script (scripts/transcribe_job.py)
+- Stage skips completed work based on DB state
+
+M2 progress notes:
+- Sentence builder (`src/clipper/sentences.py`) fixed: gap splits (>0.6s) now close the sentence before the word after the gap; punctuation and gap checks are independent; word_idx tracking corrected
+- tests/test_sentences.py: 6/6 passing, CPU-only
+
 ## M2 - Transcription
 - ASR integration (faster-whisper)
 - Word timestamps

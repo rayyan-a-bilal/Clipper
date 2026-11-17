@@ -50,3 +50,26 @@ The following components have been implemented:
 - Database migration v2 schema
 - CLI ingest command functionality 
 - Content hash idempotency system
+
+M2a - Transcript Foundations
+The following components have been implemented:
+- CPU-only transcript contracts (WordsArtifact, SentencesArtifact)
+- Deterministic sentence builder logic 
+- Fixture ASR adapter for testing
+- All tests run in CPU-only environment without GPU or model dependencies
+
+M2b - Real ASR Adapter and Transcription Stages 
+The following components have been implemented:
+- FasterWhisperASR adapter with lazy loading
+- get_adapter() factory function  
+- transcribe stage implementation
+- Manual transcription script (scripts/transcribe_job.py)
+- All tests run in CPU-only environment without GPU or model dependencies
+
+M2 (Complete) - Transcription
+- Sentence builder fixed: gap-based splits now close the sentence BEFORE the word arriving after the gap (previously the late word was appended to the previous sentence)
+- Punctuation and gap checks are independent (a punctuation-ending word no longer blocks a gap split, and vice versa)
+- word_idx tracking corrected to use the index at each split point
+- All tests in tests/test_sentences.py pass (6/6), CPU-only, no model dependencies
+
+**Current status: M2 complete. Next: M3 (Scene analysis).**
