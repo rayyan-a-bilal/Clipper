@@ -52,9 +52,12 @@ class FixtureASR(ASRAdapter):
         else:
             raise ValueError("Fixture must contain either a list of words or a dict with 'words' key")
 
-        # Validate and create Word objects
+        # Validate and create Word objects (skip empty text words, like real ASR adapter)
         words = []
         for word_data in words_data:
+            text = (word_data or {}).get("text", "")
+            if not text.strip():
+                continue
             word = Word(**word_data)
             words.append(word)
 
