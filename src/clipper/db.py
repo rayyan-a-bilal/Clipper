@@ -102,9 +102,34 @@ class Database:
         # Enable WAL mode
         cursor.execute("PRAGMA journal_mode=WAL")
         
+        # Check migration version and apply updates if needed
+        self._apply_migrations(conn)
+        
         conn.commit()
         conn.close()
         
+    def _apply_migrations(self, conn):
+        """Apply database migrations."""
+        cursor = conn.cursor()
+        
+        # Get current schema version
+        try:
+            cursor.execute("SELECT MAX(version) FROM schema_migrations")
+            result = cursor.fetchone()[0]
+            version = result if result is not None else 0
+        except Exception:
+            version = 0
+            
+        # Migration v2: Add content_hash column and unique index (M1)
+        if version < 2:
+            try:
+                cursor.execute("ALTER TABLE jobs ADD COLUMN content_hash TEXT")
+                cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_jobs_content_hash ON jobs(content_hash)")
+                self.set_schema_version(2)
+            except Exception as e:
+                # Migration already applied or failed, check
+                print(f"Migration v2 might have already been applied: {e}")
+    
     def get_schema_version(self) -> Optional[int]:
         """Get current schema version."""
         conn = self.get_connection()

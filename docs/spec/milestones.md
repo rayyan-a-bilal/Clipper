@@ -1,6 +1,6 @@
 # Milestone Specifications
 
-## M0 - Scaffold & CLI (Current)
+## M0 - Scaffold & CLI (Complete)
 - Project scaffolding with all directory structure
 - Basic config system using pydantic-settings
 - SQLite DB with basic migrations
@@ -9,7 +9,7 @@
 - Device detection and locking
 - Testing framework setup
 
-## M1 - Input processing pipeline
+## M1 - Input processing pipeline (Complete)
 - File watching/processing
 - Proxy video generation
 - Audio extraction 

@@ -1,20 +1,11 @@
 """
-Stage implementations for clipper pipeline.
+Pipeline stages for clipper.
 """
 
-# This is a placeholder directory for future stage modules 
-# Each stage will have its own module file
+class StageError(Exception):
+    """Custom exception for pipeline stage errors."""
+    pass
 
-# Future stages to be implemented:
-# - ingest.py
-# - probe.py  
-# - transcribe.py
-# - analyze.py
-# - candidates.py
-# - llm_scoring.py
-# - selection.py
-# - cuts.py
-# - reframe.py
-# - captions.py
-# - qc.py
-# - export.py
+from .ingest import run_ingest, compute_content_hash
+
+__all__ = ["run_ingest", "compute_content_hash", "StageError"]

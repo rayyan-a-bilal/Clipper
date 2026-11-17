@@ -1,100 +1,52 @@
 #!/usr/bin/env python3
 """
-Script to create test fixtures for clipper.
+Make test fixtures for clipper.
 """
 
-import json
 import os
+import shutil
+import subprocess
 from pathlib import Path
 
-# Create words.json fixture file
-def create_words_fixture():
-    """Create fake Word data for testing."""
-    words_data = [
-        {
-            "start": 0.0,
-            "end": 1.2,
-            "text": "Hello",
-            "prob": 0.95
-        },
-        {
-            "start": 1.2,
-            "end": 2.1,
-            "text": "world",
-            "prob": 0.92
-        },
-        {
-            "start": 2.1,
-            "end": 3.0,
-            "text": "this",
-            "prob": 0.87
-        },
-        {
-            "start": 3.0,
-            "end": 4.5,
-            "text": "is",
-            "prob": 0.91
-        },
-        {
-            "start": 4.5,
-            "end": 6.0,
-            "text": "a",
-            "prob": 0.85
-        },
-        {
-            "start": 6.0,
-            "end": 7.8,
-            "text": "test",
-            "prob": 0.93
-        }
-    ]
+def create_test_file():
+    """Create a simple test video file using ffmpeg."""
     
-    # Ensure fixtures directory exists
-    fixtures_dir = Path("tests/fixtures")
-    fixtures_dir.mkdir(exist_ok=True)
-    
-    # Write words.json
-    with open(fixtures_dir / "words.json", "w") as f:
-        json.dump(words_data, f, indent=2)
-        
-    print("Created tests/fixtures/words.json")
-
-def create_sample_video():
-    """Create a simple test video using ffmpeg if available."""
-    import subprocess
+    # Check if ffmpeg is available
     try:
-        # Check if ffmpeg is available
-        result = subprocess.run(
-            ["ffmpeg", "-version"], 
-            capture_output=True, 
-            text=True,
-            timeout=5
-        )
+        subprocess.run(["ffmpeg", "-version"], check=True, capture_output=True)
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        print("FFmpeg not found. Please install ffmpeg to create test fixtures.")
+        return False
+    
+    # Create a basic test video file that can be used for testing
+    fixture_dir = Path("./tests/fixtures")
+    fixture_dir.mkdir(exist_ok=True)
+    
+    # Create a simple 5-second test video with a moving pattern using ffmpeg
+    test_video = fixture_dir / "sample.mp4"
+    
+    if not test_video.exists():
+        print("Creating sample test video...")
+        # Create 10-second test video with some motion for testing
+        cmd = [
+            "ffmpeg", "-y",
+            "-f", "lavfi",
+            "-i", "testsrc=duration=5:size=640x480:rate=30",
+            "-c:v", "libx264",
+            "-t", "5",
+            str(test_video)
+        ]
         
-        if result.returncode == 0:
-            # Create a simple 10-second test video using testsrc filter
-            print("Creating sample test video...")
-            output_path = Path("tests/fixtures/sample_video.mp4")
-            cmd = [
-                "ffmpeg",
-                "-f", "lavfi",
-                "-i", "testsrc=duration=10:size=640x480:rate=30",
-                "-c:v", "libx264",
-                "-t", "10",
-                "-y",
-                str(output_path)
-            ]
-            
+        try:
             subprocess.run(cmd, check=True, capture_output=True)
-            print(f"Created {output_path}")
-        else:
-            print("ffmpeg not found - skipping video creation")
-            
-    except Exception as e:
-        print(f"Failed to create test video: {e}")
+            print(f"Created test video at {test_video}")
+        except subprocess.CalledProcessError as e:
+            print(f"Failed to create test video: {e}")
+            return False
+    
+    return True
 
 if __name__ == "__main__":
-    print("Creating test fixtures...")
-    create_words_fixture()
-    create_sample_video()
-    print("Fixtures created successfully!")
+    success = create_test_file()
+    if not success:
+        exit(1)

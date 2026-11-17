@@ -42,7 +42,41 @@ class CropKey(BaseModel):
     w: int
     h: int
 
-# Pipeline artifacts
+# Pipeline artifacts - M1 contracts
+class IngestRecord(BaseModel):
+    job_id: str
+    source_path: str
+    content_hash: str
+    client: str
+    niche: str
+    schema_version: int = 1
+
+class ProbeResult(BaseModel):
+    duration_s: float
+    width: int
+    height: int
+    fps: float
+    vcodec: str
+    acodec: str | None
+    has_audio: bool
+    size_bytes: int
+    schema_version: int = 1
+
+class ProxyInfo(BaseModel):
+    width: int
+    height: int
+    fps: float
+    path: str
+    schema_version: int = 1
+
+class AudioInfo(BaseModel):
+    sample_rate: int
+    channels: int
+    duration_s: float
+    path: str
+    schema_version: int = 1
+
+# Pipeline stages - M0 contracts
 class Candidate(BaseModel):
     cand_id: str
     start: float

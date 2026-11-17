@@ -9,6 +9,8 @@ from pathlib import Path
 from .config import Config
 from .db import Database
 from .devices import DeviceManager
+from .stages.ingest import run_ingest, compute_content_hash
+from .adapters.media import get_adapter, MediaError
 
 app = typer.Typer()
 
@@ -104,8 +106,50 @@ def ingest(
     """
     Ingest a new video for processing.
     """
-    typer.echo("Not implemented until M1")
-    raise typer.Exit(0)
+    try:
+        # Load configuration
+        config = get_config()
+        
+        # Get database connection
+        db = get_db(config)
+        conn = db.get_connection()
+        
+        # Get media adapter
+        media = get_adapter()
+        
+        # Run ingestion pipeline
+        job_id, is_new_job, should_retry = run_ingest(
+            source=source_path,
+            client=client,
+            niche=niche,
+            cfg=config,
+            conn=conn,
+            media=media
+        )
+        
+        # Print results
+        typer.echo(f"Job ID: {job_id}")
+        if is_new_job:
+            typer.echo("Created new job")
+        elif should_retry:
+            typer.echo("Retrying failed job")
+        else:
+            typer.echo("Using existing job (already completed)")
+            
+        # Print job details
+        job = db.get_job(job_id)
+        if job:
+            typer.echo(f"Source: {job['source_path']}")
+            typer.echo(f"Client: {job['client']}")  
+            typer.echo(f"Niche: {job['niche']}")
+            
+        conn.close()
+        
+        raise typer.Exit(0)
+        
+    except Exception as e:
+        typer.echo(f"Error: {e}")
+        raise typer.Exit(1)
 
 @app.command()
 def run(
