@@ -2,8 +2,6 @@
 Background worker for clipper jobs.
 """
 
-import time
-from pathlib import Path
 
 # This file will contain the background worker implementation
 # Future implementation will run pipeline stages in the background

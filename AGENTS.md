@@ -25,7 +25,7 @@
 M0 - Scaffold & CLI
 M1 - Input processing pipeline
 M2 - Transcription
-M3 - Scene analysis
+M3 - Scene analysis  
 M4 - Clip candidates generation
 M5 - LLM scoring
 M6 - Quality gate & selection
@@ -40,3 +40,13 @@ M10 - QC workflow + Outbox
 - No live LLM calls
 - No model downloads
 - No root privileges required
+
+## Progress Update
+
+M1 - Input processing pipeline is now complete.
+The following components have been implemented:
+- Ingest pipeline with probe, proxy, and audio extraction stages  
+- FFmpeg-based media adapter with error handling
+- Database migration v2 schema
+- CLI ingest command functionality 
+- Content hash idempotency system

@@ -6,7 +6,7 @@ Web interface for clipper.
 
 # Future web components to be implemented:
 # - api.py (FastAPI routes)
-# - templates/ (Jinja2 templates)  
+# - templates/ (Jinja2 templates)
 # - static/ (CSS, JS, assets)
 # - qc_views.py (QC workflow views)
 

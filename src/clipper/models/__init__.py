@@ -2,9 +2,11 @@
 Data models for clipper pipeline.
 """
 
-from typing import Literal, Tuple
-from pydantic import BaseModel
 from enum import Enum
+from typing import Literal, Tuple
+
+from pydantic import BaseModel
+
 
 # Basic data structures
 class Word(BaseModel):
@@ -17,7 +19,7 @@ class Sentence(BaseModel):
     start: float
     end: float
     text: str
-    word_idx: Tuple[int, int]
+    word_idx: tuple[int, int]
 
 class Shot(BaseModel):
     start: float

@@ -3,32 +3,31 @@ SQLite database interface for clipper.
 """
 
 import sqlite3
-import os
-from pathlib import Path
-from typing import Optional, List, Dict, Any
 from datetime import datetime
+from typing import Any
 
 from .config import Config
 
+
 class Database:
     """SQLite database manager for clipper."""
-    
+
     def __init__(self, config: Config):
         self.config = config
         self.db_path = self.config.resolved_data_dir / "clipper.db"
         self.init_db()
-        
+
     def get_connection(self) -> sqlite3.Connection:
         """Get a database connection."""
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row  # Enable column access by name
         return conn
-    
+
     def init_db(self):
         """Initialize the database with required tables."""
         conn = self.get_connection()
         cursor = conn.cursor()
-        
+
         # Create schema migration table
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -36,7 +35,7 @@ class Database:
                 applied_at TEXT
             )
         """)
-        
+
         # Create jobs table
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS jobs (
@@ -49,7 +48,7 @@ class Database:
                 updated_at TEXT
             )
         """)
-        
+
         # Create stages table
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS stages (
@@ -63,7 +62,7 @@ class Database:
                 PRIMARY KEY(job_id, name)
             )
         """)
-        
+
         # Create clips table
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS clips (
@@ -75,7 +74,7 @@ class Database:
                 updated_at TEXT
             )
         """)
-        
+
         # Create candidates table
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS candidates (
@@ -85,7 +84,7 @@ class Database:
                 score_json TEXT
             )
         """)
-        
+
         # Create posts table
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS posts (
@@ -98,20 +97,20 @@ class Database:
                 updated_at TEXT
             )
         """)
-        
+
         # Enable WAL mode
         cursor.execute("PRAGMA journal_mode=WAL")
-        
+
         # Check migration version and apply updates if needed
         self._apply_migrations(conn)
-        
+
         conn.commit()
         conn.close()
-        
+
     def _apply_migrations(self, conn):
         """Apply database migrations."""
         cursor = conn.cursor()
-        
+
         # Get current schema version
         try:
             cursor.execute("SELECT MAX(version) FROM schema_migrations")
@@ -119,7 +118,7 @@ class Database:
             version = result if result is not None else 0
         except Exception:
             version = 0
-            
+
         # Migration v2: Add content_hash column and unique index (M1)
         if version < 2:
             try:
@@ -129,8 +128,8 @@ class Database:
             except Exception as e:
                 # Migration already applied or failed, check
                 print(f"Migration v2 might have already been applied: {e}")
-    
-    def get_schema_version(self) -> Optional[int]:
+
+    def get_schema_version(self) -> int | None:
         """Get current schema version."""
         conn = self.get_connection()
         cursor = conn.cursor()
@@ -142,7 +141,7 @@ class Database:
             return 0
         finally:
             conn.close()
-    
+
     def set_schema_version(self, version: int):
         """Set current schema version."""
         conn = self.get_connection()
@@ -156,8 +155,8 @@ class Database:
             conn.commit()
         finally:
             conn.close()
-            
-    def get_all_jobs(self) -> List[Dict[str, Any]]:
+
+    def get_all_jobs(self) -> list[dict[str, Any]]:
         """Get all jobs."""
         conn = self.get_connection()
         cursor = conn.cursor()
@@ -166,8 +165,8 @@ class Database:
             return [dict(row) for row in cursor.fetchall()]
         finally:
             conn.close()
-            
-    def get_job(self, job_id: str) -> Optional[Dict[str, Any]]:
+
+    def get_job(self, job_id: str) -> dict[str, Any] | None:
         """Get a specific job."""
         conn = self.get_connection()
         cursor = conn.cursor()
@@ -177,7 +176,7 @@ class Database:
             return dict(row) if row else None
         finally:
             conn.close()
-            
+
     def create_job(self, job_id: str, source_path: str, client: str, niche: str) -> bool:
         """Create a new job."""
         conn = self.get_connection()
@@ -216,7 +215,7 @@ class Database:
         finally:
             conn.close()
 
-    def get_all_stages_for_job(self, job_id: str) -> List[Dict[str, Any]]:
+    def get_all_stages_for_job(self, job_id: str) -> list[dict[str, Any]]:
         """Get all stages for a specific job."""
         conn = self.get_connection()
         cursor = conn.cursor()
@@ -225,21 +224,21 @@ class Database:
             return [dict(row) for row in cursor.fetchall()]
         finally:
             conn.close()
-            
-    def get_stage(self, job_id: str, stage_name: str) -> Optional[Dict[str, Any]]:
+
+    def get_stage(self, job_id: str, stage_name: str) -> dict[str, Any] | None:
         """Get a specific stage for a job."""
         conn = self.get_connection()
         cursor = conn.cursor()
         try:
             cursor.execute(
-                "SELECT * FROM stages WHERE job_id = ? AND name = ?", 
+                "SELECT * FROM stages WHERE job_id = ? AND name = ?",
                 (job_id, stage_name)
             )
             row = cursor.fetchone()
             return dict(row) if row else None
         finally:
             conn.close()
-            
+
     def create_stage(self, job_id: str, stage_name: str, state: str = "pending") -> bool:
         """Create a new stage for a job."""
         conn = self.get_connection()
@@ -258,9 +257,9 @@ class Database:
             return False
         finally:
             conn.close()
-            
-    def update_stage(self, job_id: str, stage_name: str, state: str, 
-                     artifact_path: Optional[str] = None, error: Optional[str] = None) -> bool:
+
+    def update_stage(self, job_id: str, stage_name: str, state: str,
+                     artifact_path: str | None = None, error: str | None = None) -> bool:
         """Update a stage state."""
         conn = self.get_connection()
         cursor = conn.cursor()
@@ -310,7 +309,7 @@ class Database:
             return False
         finally:
             conn.close()
-            
+
     def update_clip_status(self, clip_id: str, status: str) -> bool:
         """Update clip status."""
         conn = self.get_connection()
@@ -329,8 +328,8 @@ class Database:
             return False
         finally:
             conn.close()
-            
-    def get_all_clips(self) -> List[Dict[str, Any]]:
+
+    def get_all_clips(self) -> list[dict[str, Any]]:
         """Get all clips."""
         conn = self.get_connection()
         cursor = conn.cursor()
@@ -339,8 +338,8 @@ class Database:
             return [dict(row) for row in cursor.fetchall()]
         finally:
             conn.close()
-            
-    def get_clips_for_job(self, job_id: str) -> List[Dict[str, Any]]:
+
+    def get_clips_for_job(self, job_id: str) -> list[dict[str, Any]]:
         """Get all clips for a specific job."""
         conn = self.get_connection()
         cursor = conn.cursor()
