@@ -1,6 +1,6 @@
 # Clipper - Local, Headless Video Clipping Pipeline
 
-Clipper is a local, headless video clipping pipeline designed for content creation workflows. It processes video files through multiple stages including probing, proxy generation, audio extraction, and candidate analysis.
+Clipper is a local, headless video clipping pipeline designed for content creation workflows. It processes video files through multiple stages: probe, proxy generation, audio extraction, transcription, and shot/silence/energy analysis (the basis for clip candidate selection).
 
 ## Current Status (2026-11-18)
 
@@ -9,18 +9,21 @@ Clipper is a local, headless video clipping pipeline designed for content creati
 | M0 – Scaffold & CLI | ✅ complete |
 | M1 – Ingest pipeline | ✅ complete, verified end-to-end on real video (probe/proxy/audio) |
 | M2 – Transcription | ✅ complete, verified on real audio (152 words / 22 sentences, validated) |
-| M3+ – Scene analysis etc. | ⏳ not started |
+| M3 – Scene analysis (M3a foundations + M3b analysis stage) | ✅ complete, verified on real video (12 shots / 22 silence regions / 162 energy windows) |
+| M4+ – Clip candidates, scoring, cuts | ⏳ not started |
 
 Notes:
-- ASR currently runs on **CPU int8** — GPUs 0–2 are occupied by another workload. When GPU0 is free: set `CLIPPER_ASR_DEVICE=cuda:0` and `CLIPPER_ASR_COMPUTE_TYPE=float16` (or edit `ASRConfig` defaults in `src/clipper/config.py`)
-- `clipper run --job-id` is still a stub; use the transcription script (see below)
+- ASR currently runs on **CPU int8** — GPUs 0–2 are occupied by another workload. When GPU0 is free: set `CLIPPER_ASR_DEVICE=cuda:0` and `CLIPPER_ASR_COMPUTE_TYPE=float16` (or edit `ASRConfig` defaults in `src/clipper/config.py`) — analysis (M3) is always CPU-only
+- `clipper run --job-id` is still a stub; use the per-milestone scripts (see below)
+- **Headless OpenCV rule:** this server must use `opencv-python-headless` and NEVER `opencv-python` (GUI build fails with `libGL.so.1`). scenedetect ≥0.7 declares `opencv-python` as a dependency, so install it with `pip install scenedetect --no-deps` and get `cv2` from `opencv-python-headless` (`pip check` then shows an expected false-positive)
 - See `BLOCKED.md` for open items (none blocking) and `docs/spec/milestones.md` for full progress notes
 
 ## Requirements
 
 - Python 3.11+
 - FFmpeg (for media processing)
-- NVIDIA GPU (optional, for accelerated processing)
+- scenedetect + opencv-python-headless (M3 shot/silence/energy analysis — headless build ONLY, see Installation note)
+- NVIDIA GPU (optional, ASR only; analysis is CPU-only)
 
 ## Installation
 
@@ -31,6 +34,13 @@ source .venv/bin/activate
 
 # Install the package in development mode
 pip install -e .
+
+# ⚠️ scenedetect ≥0.7 pulls full opencv-python (breaks on this headless
+# server with libGL.so.1). Reinstall it without its declared deps and
+# provide cv2 via the headless build instead:
+pip install click tqdm          # scenedetect runtime deps
+pip install scenedetect --no-deps
+pip install --force-reinstall opencv-python-headless
 ```
 
 ## Usage
@@ -61,6 +71,18 @@ python scripts/transcribe_job.py <job-id>
 # `python -m clipper run --job-id <job-id>` is not implemented yet
 ```
 
+### Analyze a Job (M3)
+Runs the shots → silence → energy analysis stages on an ingested job (CPU-only; requires `scenedetect` + `opencv-python-headless` as above):
+```bash
+python scripts/analyze_job.py <job-id>
+# prints job id, shot count, silence region count, energy window count, artifact paths
+# artifacts: data/jobs/<job-id>/{shots.json,silence.json,energy.json} (schema_version 1)
+# each stage is skipped when already done (state=done + artifact + schema v1); exits 0/1
+```
+- **shots** — PySceneDetect `ContentDetector` (threshold 27.0) on `proxy.mp4`; always ≥1 shot, contiguous, covering `[0, duration]`
+- **silence** — ffmpeg `silencedetect=noise=-35dB:d=0.5` on `audio.wav`
+- **energy** — 0.5s RMS windows from `audio.wav` (16kHz mono pcm_s16le validated; silent windows clamp at −120.0 dB)
+
 ## Project Structure
 
 - `src/clipper/` - Core application code
@@ -68,11 +90,14 @@ python scripts/transcribe_job.py <job-id>
   - `config.py` - Configuration management
   - `db.py` - Database operations  
   - `devices.py` - Device detection and management
-  - `stages/` - Pipeline stage implementations
-  - `adapters/` - Media processing adapters
-  - `models/` - Data models
+  - `stages/` - Pipeline stage implementations (`ingest`, `transcribe`, `analyze`)
+  - `adapters/` - Media processing adapters (`media`, `asr`, `scenes` — all with CPU-only fixtures)
+  - `models/` - Data models and artifact contracts
+  - `audio_analysis.py` - Pure CPU silence parsing + RMS windowing
 
 - `tests/` - Test suite
+- `scripts/transcribe_job.py` - M2 transcription runner
+- `scripts/analyze_job.py` - M3 analysis runner
 - `scripts/make_fixtures.py` - Script to create test fixtures
 
 ## Development
