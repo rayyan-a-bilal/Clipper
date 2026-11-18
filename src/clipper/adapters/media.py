@@ -9,7 +9,17 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Any
 
-from ..models import AudioInfo, ProbeResult, ProxyInfo
+from ..audio_analysis import (
+    SILENCE_MIN_DUR,
+    SILENCE_NOISE_DB,
+    parse_silence_log,
+)
+from ..models import (
+    AudioInfo,
+    ProbeResult,
+    ProxyInfo,
+    SilenceRegion,
+)
 
 
 class MediaError(Exception):
@@ -33,6 +43,17 @@ class MediaAdapter(ABC):
     @abstractmethod
     def extract_wav(self, src: str, dst: str) -> AudioInfo:
         """Extract audio to WAV format."""
+        pass
+
+    @abstractmethod
+    def detect_silence(
+        self,
+        wav_path: str,
+        duration_s: float,
+        noise_db: float = SILENCE_NOISE_DB,
+        min_dur: float = SILENCE_MIN_DUR,
+    ) -> list[SilenceRegion]:
+        """Detect silence regions in a 16kHz mono WAV file."""
         pass
 
 
@@ -203,11 +224,65 @@ class FFmpegMediaAdapter(MediaAdapter):
             path=os.path.abspath(dst)
         )
 
+    def detect_silence(
+        self,
+        wav_path: str,
+        duration_s: float,
+        noise_db: float = SILENCE_NOISE_DB,
+        min_dur: float = SILENCE_MIN_DUR,
+    ) -> list[SilenceRegion]:
+        """Run ffmpeg silencedetect and parse the stderr log.
+
+        Command per docs/spec/m3.md:
+          ffmpeg -hide_banner -nostats -i <wav> \
+            -af silencedetect=noise=-35dB:d=0.5 -f null -
+
+        silencedetect reports regions on stderr at info level, so this is a
+        dedicated run (not _run_ffmpeg, which forces -loglevel error).
+        """
+        if not os.path.exists(wav_path):
+            raise MediaError(f"Audio file does not exist: {wav_path}")
+
+        full_cmd = [
+            "ffmpeg",
+            "-hide_banner",
+            "-nostats",
+            "-i", wav_path,
+            "-af", f"silencedetect=noise={noise_db}dB:d={min_dur}",
+            "-f", "null", "-",
+        ]
+
+        try:
+            process = subprocess.run(
+                full_cmd, capture_output=True, text=False, timeout=600
+            )
+        except subprocess.TimeoutExpired as e:
+            raise MediaError(
+                "ffmpeg silencedetect timed out after 600 seconds"
+            ) from e
+        except FileNotFoundError as e:
+            raise MediaError("FFmpeg not found. Please install ffmpeg.") from e
+
+        if process.returncode != 0:
+            stderr_text = process.stderr.decode('utf-8', errors='ignore')[-2000:]
+            raise MediaError(
+                "FFmpeg silencedetect failed with code "
+                f"{process.returncode}: {stderr_text}"
+            )
+
+        stderr_text = process.stderr.decode('utf-8', errors='ignore')
+        return parse_silence_log(stderr_text, duration_s)
+
 
 class FixtureMediaAdapter(MediaAdapter):
     """Mock media adapter for testing."""
 
-    def __init__(self, probe_result: ProbeResult = None, has_audio: bool = True):
+    def __init__(
+        self,
+        probe_result: ProbeResult = None,
+        has_audio: bool = True,
+        silence_regions: list[SilenceRegion] | None = None,
+    ):
         self._probe_result = probe_result or ProbeResult(
             duration_s=10.0,
             width=1920,
@@ -218,6 +293,7 @@ class FixtureMediaAdapter(MediaAdapter):
             has_audio=has_audio,
             size_bytes=1000000
         )
+        self._silence_regions = silence_regions
 
     def probe(self, path: str) -> ProbeResult:
         """Use the fixed probe result."""
@@ -247,6 +323,29 @@ class FixtureMediaAdapter(MediaAdapter):
             duration_s=10.0,
             path=os.path.abspath(dst)
         )
+
+    @classmethod
+    def _default_regions(cls) -> list[SilenceRegion]:
+        return [
+            SilenceRegion(
+                start=2.0,
+                end=3.5,
+            )
+        ]
+
+    def detect_silence(
+        self,
+        wav_path: str,
+        duration_s: float,
+        noise_db: float = SILENCE_NOISE_DB,
+        min_dur: float = SILENCE_MIN_DUR,
+    ) -> list[SilenceRegion]:
+        """Return canned silence regions (configurable at construction)."""
+        if self._silence_regions is not None:
+            regions = self._silence_regions
+        else:
+            regions = self._default_regions()
+        return [SilenceRegion(start=r.start, end=r.end) for r in regions]
 
 
 _adapter_instance: MediaAdapter | None = None

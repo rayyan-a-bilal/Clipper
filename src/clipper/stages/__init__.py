@@ -6,8 +6,9 @@ class StageError(Exception):
     """Custom exception for pipeline stage errors."""
     pass
 
-# NOTE: import kept below the StageError definition to avoid a circular import
+# NOTE: imports kept below the StageError definition to avoid a circular import
 # (ingest.py does `from . import StageError`), which is why E402 is suppressed here.
+from .analyze import run_analysis  # noqa: E402
 from .ingest import compute_content_hash, run_ingest  # noqa: E402
 
-__all__ = ["run_ingest", "compute_content_hash", "StageError"]
+__all__ = ["run_ingest", "compute_content_hash", "StageError", "run_analysis"]

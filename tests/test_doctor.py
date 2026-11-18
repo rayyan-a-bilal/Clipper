@@ -24,19 +24,23 @@ def test_doctor_command_runs():
         mock_db.return_value = mock_db_instance
 
         mock_devices_instance = MagicMock()
-        mock_devices_instance.get_all_devices.return_value = {"nvidia": {}, "ffmpeg": {}}
+        mock_devices_instance.get_all_devices.return_value = (
+            {"nvidia": {}, "ffmpeg": {}}
+        )
         mock_devices.return_value = mock_devices_instance
 
         # This should not raise any exception
         try:
-            doctor()  # This is the function that gets called when running doctor command
+            doctor()  # doctor command entry point
             assert True  # If we get here, no exception was raised
         except SystemExit as e:
             # Can be expected for argument parsing errors but shouldn't be other errors
             assert e.code == 0  # Success exit code
 
         # Test with missing essential components
-        mock_devices_instance.get_all_devices.return_value = {"nvidia": {"error": "not found"}, "ffmpeg": {"error": "not found"}}
+        mock_devices_instance.get_all_devices.return_value = (
+            {"nvidia": {"error": "not found"}, "ffmpeg": {"error": "not found"}}
+        )
 
         try:
             doctor()
@@ -61,8 +65,12 @@ def test_doctor_with_temp_data_dir():
             mock_db.return_value = mock_db_instance
 
             mock_devices_instance = MagicMock()
-            mock_devices_instance.get_all_devices.return_value = {"nvidia": {}, "ffmpeg": {}}
+            mock_devices_instance.get_all_devices.return_value = (
+                {"nvidia": {}, "ffmpeg": {}}
+            )
             mock_devices.return_value = mock_devices_instance
+
+            mock_devices_instance = MagicMock()
 
             try:
                 doctor()

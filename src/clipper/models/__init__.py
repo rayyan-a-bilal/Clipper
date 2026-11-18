@@ -122,8 +122,12 @@ class Job(BaseModel):
     stages: dict[str, str]
 
 
-# Re-export transcript artifacts (defined in transcript_artifacts.py, which
-# Re-export artifacts (defined in transcript_artifacts.py, which imports the
-# base classes above, so this must stay at the end of the module)
+# Re-export artifacts (defined in *_artifacts.py, which import the base
+# classes above, so these must stay at the end of the module)
+from .analysis_artifacts import EnergyArtifact as EnergyArtifact  # noqa: E402
+from .analysis_artifacts import EnergyWindow as EnergyWindow  # noqa: E402
+from .analysis_artifacts import ShotsArtifact as ShotsArtifact  # noqa: E402
+from .analysis_artifacts import SilenceArtifact as SilenceArtifact  # noqa: E402
+from .analysis_artifacts import SilenceRegion as SilenceRegion  # noqa: E402
 from .transcript_artifacts import SentencesArtifact as SentencesArtifact  # noqa: E402
 from .transcript_artifacts import WordsArtifact as WordsArtifact  # noqa: E402

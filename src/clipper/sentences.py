@@ -39,7 +39,9 @@ def build_sentences(words: list[Word]) -> list[Sentence]:
             ends_punct = prev_word.text.strip().endswith(('.', '?', '!'))
             word_ends_sentence = word.text.strip().endswith(('.', '?', '!'))
             if (ends_punct and not word_ends_sentence) or gap > 0.6:
-                sentences.append(_create_sentence(current_sentence_words, current_start_index))
+                sentences.append(
+                    _create_sentence(current_sentence_words, current_start_index)
+                )
                 current_sentence_words = []
                 current_start_index = i
 
@@ -127,8 +129,14 @@ def _split_long_sentence(sentence: Sentence, all_words: list[Word]) -> list[Sent
     second_part_words = sent_words[split_point:]
 
     # Get proper indices for each part
-    first_start_idx = all_words.index(first_part_words[0]) if first_part_words else start_idx
-    second_start_idx = all_words.index(second_part_words[0]) if second_part_words else end_idx - 1
+    first_part = first_part_words[0] if first_part_words else None
+    first_start_idx = (
+        all_words.index(first_part) if first_part is not None else start_idx
+    )
+    second_part = second_part_words[0] if second_part_words else None
+    second_start_idx = (
+        all_words.index(second_part) if second_part is not None else end_idx - 1
+    )
 
     # Create the two new sentences
     first_sentence = _create_sentence(first_part_words, first_start_idx)
