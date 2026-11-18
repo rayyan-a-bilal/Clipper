@@ -59,7 +59,6 @@ def create_words_fixture():
         with open(words_fixture, 'w') as f:
             json.dump(words_data, f, indent=2)
 
-        print(f"Created words.json fixture at {words_fixture}")
 
     return True
 
@@ -73,29 +72,26 @@ def create_sample_video():
     test_video = fixture_dir / "sample.mp4"
 
     if not test_video.exists():
-        print("Creating dummy test video...")
-        # Just create a small dummy file (would normally be filled with actual video data)
+        # Just create a small dummy file (normally filled with actual video data)
         with open(test_video, 'w') as f:
             f.write("# Dummy MP4 test file\n")
             f.write("This is a placeholder for testing purposes\n")
             f.write("In a real installation, this would contain actual video content\n")
 
-        print(f"Created dummy test video at {test_video}")
 
     return True
 
 def create_all_fixtures():
     """Create all the required test fixtures."""
-    print("Creating test fixtures...")
 
     success = True
     success &= create_words_fixture()
     success &= create_sample_video()
 
     if success:
-        print("All test fixtures created successfully!")
+        pass
     else:
-        print("Failed to create some test fixtures.")
+        pass
 
     return success
 

@@ -3,9 +3,9 @@ ASR Adapter protocol and implementations for clipper.
 """
 
 import gc
+import os
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import List
 
 from ..models import Word
 
@@ -30,7 +30,7 @@ class FixtureASR(ASRAdapter):
     def __init__(self, fixture_path: Path = None):
         """
         Initialize the fixture ASR.
-        
+
         Args:
             fixture_path: Path to JSON fixture file containing words data
         """
@@ -50,9 +50,11 @@ class FixtureASR(ASRAdapter):
         elif isinstance(data, dict) and "words" in data:
             words_data = data["words"]
         else:
-            raise ValueError("Fixture must contain either a list of words or a dict with 'words' key")
+            raise ValueError(
+                "Fixture must contain either a list of words or a dict with 'words' key"
+            )
 
-        # Validate and create Word objects (skip empty text words, like real ASR adapter)
+        # Validate and create Word objects (skip empty text words)
         words = []
         for word_data in words_data:
             text = (word_data or {}).get("text", "")
@@ -75,7 +77,7 @@ class FasterWhisperASR(ASRAdapter):
     def __init__(self, cfg):
         """
         Initialize the faster-whisper ASR adapter.
-        
+
         Args:
             cfg: Configuration object containing device and model settings
         """
@@ -87,49 +89,56 @@ class FasterWhisperASR(ASRAdapter):
         """Load the whisper model lazily."""
         if self._model is not None:
             return  # Already loaded
-            
-        # Import faster_whisper only when needed to avoid CPU-only test dependency issues
+
+        # Lazy import: faster_whisper stays optional for CPU-only tests
         try:
             from faster_whisper import WhisperModel
         except ImportError as e:
-            raise RuntimeError("faster_whisper not installed. Please install with: pip install faster-whisper") from e
-            
-        # Parse device from config 
+            raise RuntimeError(
+                "faster_whisper not installed: `pip install faster-whisper`"
+            ) from e
+
+        # Parse device from config
         device = self.cfg.asr.device if hasattr(self.cfg.asr, 'device') else "cuda:0"
-        
+
         # Handle device parsing and configuration
         if device == "cpu":
             self._model_device = "cpu"
-            compute_type = "float32"
+            device_index = 0  # ctranslate2 >= 4.9 requires an int device_index
+            # Respect configured compute type (e.g. float32 / int8) on CPU
+            compute_type = (self.cfg.asr.compute_type
+                            if hasattr(self.cfg.asr, 'compute_type') else "float32")
         else:
             # For cuda devices like "cuda:0", we'll use gpu
-            # Parse GPU ID from device string
+            # Parse GPU ID from device string (GPU0 only, never the P100s)
             try:
                 device_index = int(device.split(":")[1]) if ":" in device else 0
             except (ValueError, IndexError):
                 device_index = 0
-            
+
             self._model_device = "cuda"
             # Extract compute type from config or default to float16
-            compute_type = self.cfg.asr.compute_type if hasattr(self.cfg.asr, 'compute_type') else "float16"
-        
+            compute_type = (self.cfg.asr.compute_type
+                            if hasattr(self.cfg.asr, 'compute_type') else "float16")
+
         # Load model with the specified parameters
         try:
-            # Using device_index approach as recommended by faster_whisper docs
             self._model = WhisperModel(
                 model_size_or_path=self.cfg.asr.model or "large-v3-turbo",
                 device=self._model_device,
                 compute_type=compute_type,
-                device_index=device_index if self._model_device == "cuda" else None
+                device_index=device_index,
+                # ctranslate2 >= 4.9 rejects intra_threads=0 (faster-whisper's default)
+                cpu_threads=os.cpu_count() or 1 if self._model_device == "cpu" else 0,
             )
         except Exception as e:
             raise RuntimeError(f"Failed to load Whisper model: {e}") from e
 
-    def transcribe(self, wav_path: Path) -> List[Word]:
+    def transcribe(self, wav_path: Path) -> list[Word]:
         """Transcribe audio file using faster-whisper."""
         if self._model is None:
             self._load_model()
-            
+
         # Run transcription with specified parameters
         segments, info = self._model.transcribe(
             str(wav_path),
@@ -138,7 +147,7 @@ class FasterWhisperASR(ASRAdapter):
             condition_on_previous_text=False,
             beam_size=5
         )
-        
+
         # Convert to Word objects (as per task requirements)
         words = []
         for segment in segments:
@@ -146,7 +155,7 @@ class FasterWhisperASR(ASRAdapter):
                 # Skip empty text words
                 if not word.word.strip():
                     continue
-                    
+
                 word_obj = Word(
                     start=float(word.start),
                     end=float(word.end),
@@ -154,7 +163,7 @@ class FasterWhisperASR(ASRAdapter):
                     prob=float(word.probability)
                 )
                 words.append(word_obj)
-                
+
         return words
 
     def close(self) -> None:
@@ -169,11 +178,11 @@ class FasterWhisperASR(ASRAdapter):
 def get_adapter(cfg):
     """
     Factory function to get appropriate ASR adapter.
-    
+
     Args:
         cfg: Configuration object
-        
+
     Returns:
-        ASRAdapter instance 
+        ASRAdapter instance
     """
     return FasterWhisperASR(cfg)

@@ -2,6 +2,17 @@
 
 Clipper is a local, headless video clipping pipeline designed for content creation workflows. It processes video files through multiple stages including probing, proxy generation, audio extraction, and candidate analysis.
 
+## 📍 Current Status (2026-11-18)
+
+| Milestone | State |
+|---|---|
+| M0 – Scaffold & CLI | ✅ complete |
+| M1 – Ingest pipeline | ✅ complete, verified end-to-end on real video (probe/proxy/audio) |
+| M2 – Transcription | ✅ complete, verified on real audio (152 words / 22 sentences, validated) |
+| M3+ – Scene analysis etc. | ⏳ not started |
+
+Notes: ASR currently runs on **CPU int8** (GPUs 0–2 occupied by another workload) — when GPU0 frees up set `CLIPPER_ASR_DEVICE=cuda:0` + `CLIPPER_ASR_COMPUTE_TYPE=float16`. `clipper run --job-id` is still a stub; use `python scripts/transcribe_job.py <job-id>`. Full progress: `docs/spec/milestones.md`, open items: `BLOCKED.md`.
+
 ## 🚀 Features
 
 - **Modular Architecture**: Clean separation of concerns with clearly defined pipeline stages

@@ -1,87 +1,68 @@
 #!/usr/bin/env python3
 """
 Manual transcription script for clipper jobs.
+
+Runs the transcribe and sentences stages on an already-ingested job.
+
+Usage:
+    python scripts/transcribe_job.py <job-id>
 """
 
 import argparse
-import os
-from pathlib import Path
+import json
+import sys
 
-import typer
-
+from clipper.adapters.asr import get_adapter
 from clipper.config import Config
-from clipper.db import DB
+from clipper.db import Database
 from clipper.stages.transcribe import run_transcribe
 
 
-def main(job_id: str):
+def main(job_id: str) -> int:
     """
-    Transcribe a job manually.
-    
+    Transcribe a job.
+
     Args:
         job_id: The job ID to transcribe
+
+    Returns:
+        0 on success, 1 on failure
     """
-    # Load configuration
     cfg = Config.load_config()
-    
-    # Connect to database
-    db_path = cfg.resolved_data_dir / "jobs.db"
-    if not db_path.exists():
-        print(f"Database not found at {db_path}")
+
+    db = Database(cfg)
+    if db.get_job(job_id) is None:
+        print(f"Error: job {job_id} not found")
         return 1
-        
-    conn = DB.connect(str(db_path))
-    
+
+    asr = get_adapter(cfg)
     try:
-        # Get adapter and run transcription
-        from clipper.adapters.asr import get_adapter
-        asr = get_adapter(cfg)
-        
-        print(f"Starting transcription for job {job_id}")
-        success = run_transcribe(job_id, cfg, conn, asr)
-        
-        if success:
-            # Report results 
-            job_dir = cfg.data_dir / "jobs" / job_id
-            
-            # Count words
-            words_file = job_dir / "words.json"
-            word_count = 0
-            if words_file.exists():
-                import json
-                with open(words_file) as f:
-                    words_data = json.load(f)
-                    word_count = len(words_data.get("words", []))
-            
-            # Count sentences 
-            sentences_file = job_dir / "sentences.json"
-            sentence_count = 0
-            if sentences_file.exists():
-                import json
-                with open(sentences_file) as f:
-                    sentences_data = json.load(f)
-                    sentence_count = len(sentences_data.get("sentences", []))
-            
-            print(f"Job {job_id} transcription completed")
-            print(f"  Words: {word_count}")
-            print(f"  Sentences: {sentence_count}")
-            print(f"  Words file: {words_file}")
-            print(f"  Sentences file: {sentences_file}")
-            return 0
-        else:
-            print(f"Failed to complete transcription for job {job_id}")
+        if not run_transcribe(job_id, cfg, asr):
+            print("Error: transcription stage did not report success")
             return 1
-            
     except Exception as e:
-        print(f"Error transcribing job {job_id}: {e}")
+        print(f"Error: transcription failed: {e}")
         return 1
-    finally:
-        conn.close()
+
+    # Report results
+    job_dir = cfg.resolved_data_dir / "jobs" / job_id
+
+    words_file = job_dir / "words.json"
+    if words_file.exists():
+        with open(words_file) as f:
+            print(f"words:     {len(json.load(f).get('words', []))}")
+
+    sentences_file = job_dir / "sentences.json"
+    if sentences_file.exists():
+        with open(sentences_file) as f:
+            print(f"sentences: {len(json.load(f).get('sentences', []))}")
+
+    return 0
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Transcribe a clipper job")
     parser.add_argument("job_id", help="Job ID to transcribe")
-    
+
     args = parser.parse_args()
-    exit(main(args.job_id))
+    sys.exit(main(args.job_id))

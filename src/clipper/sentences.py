@@ -9,10 +9,10 @@ from .models import Sentence, Word
 def build_sentences(words: list[Word]) -> list[Sentence]:
     """
     Build sentences from a list of words following specific rules.
-    
+
     Args:
         words: List of Word objects in chronological order
-        
+
     Returns:
         List of Sentence objects
     """

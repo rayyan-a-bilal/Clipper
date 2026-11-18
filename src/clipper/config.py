@@ -32,6 +32,8 @@ class ASRConfig(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="CLIPPER_")
 
     model: str = "large-v3-turbo"
+    device: str = "cpu"  # GPU0 (cuda:0) per spec when free; CPU as safe default
+    compute_type: str = "int8"  # "float16" on cuda, "int8" / "float32" on cpu
     word_timestamps: bool = True
     vad_filter: bool = True
     condition_on_previous_text: bool = False

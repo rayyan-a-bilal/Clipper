@@ -125,9 +125,9 @@ class Database:
                 cursor.execute("ALTER TABLE jobs ADD COLUMN content_hash TEXT")
                 cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_jobs_content_hash ON jobs(content_hash)")
                 self.set_schema_version(2)
-            except Exception as e:
+            except Exception:
                 # Migration already applied or failed, check
-                print(f"Migration v2 might have already been applied: {e}")
+                pass
 
     def get_schema_version(self) -> int | None:
         """Get current schema version."""
@@ -184,7 +184,7 @@ class Database:
         try:
             timestamp = datetime.now().isoformat()
             cursor.execute("""
-                INSERT OR IGNORE INTO jobs 
+                INSERT OR IGNORE INTO jobs
                 (job_id, source_path, client, niche, state, created_at, updated_at)
                 VALUES (?, ?, ?, ?, 'queued', ?, ?)
             """, (job_id, source_path, client, niche, timestamp, timestamp))
@@ -203,8 +203,8 @@ class Database:
         try:
             timestamp = datetime.now().isoformat()
             cursor.execute("""
-                UPDATE jobs 
-                SET state = ?, updated_at = ? 
+                UPDATE jobs
+                SET state = ?, updated_at = ?
                 WHERE job_id = ?
             """, (state, timestamp, job_id))
             conn.commit()
@@ -246,7 +246,7 @@ class Database:
         try:
             timestamp = datetime.now().isoformat()
             cursor.execute("""
-                INSERT OR IGNORE INTO stages 
+                INSERT OR IGNORE INTO stages
                 (job_id, name, state, started_at, finished_at)
                 VALUES (?, ?, ?, ?, ?)
             """, (job_id, stage_name, state, timestamp, None))
@@ -267,19 +267,19 @@ class Database:
             timestamp = datetime.now().isoformat()
             if state == "completed":
                 cursor.execute("""
-                    UPDATE stages 
+                    UPDATE stages
                     SET state = ?, artifact_path = ?, finished_at = ?
                     WHERE job_id = ? AND name = ?
                 """, (state, artifact_path, timestamp, job_id, stage_name))
             elif state == "failed":
                 cursor.execute("""
-                    UPDATE stages 
+                    UPDATE stages
                     SET state = ?, error = ?, finished_at = ?
                     WHERE job_id = ? AND name = ?
                 """, (state, error, timestamp, job_id, stage_name))
             else:
                 cursor.execute("""
-                    UPDATE stages 
+                    UPDATE stages
                     SET state = ?
                     WHERE job_id = ? AND name = ?
                 """, (state, job_id, stage_name))
@@ -298,7 +298,7 @@ class Database:
         try:
             timestamp = datetime.now().isoformat()
             cursor.execute("""
-                INSERT OR IGNORE INTO clips 
+                INSERT OR IGNORE INTO clips
                 (clip_id, job_id, plan_json, status, created_at, updated_at)
                 VALUES (?, ?, ?, ?, ?, ?)
             """, (clip_id, job_id, plan_json, status, timestamp, timestamp))
@@ -317,8 +317,8 @@ class Database:
         try:
             timestamp = datetime.now().isoformat()
             cursor.execute("""
-                UPDATE clips 
-                SET status = ?, updated_at = ? 
+                UPDATE clips
+                SET status = ?, updated_at = ?
                 WHERE clip_id = ?
             """, (status, timestamp, clip_id))
             conn.commit()
@@ -355,7 +355,7 @@ class Database:
         cursor = conn.cursor()
         try:
             cursor.execute("""
-                INSERT OR IGNORE INTO candidates 
+                INSERT OR IGNORE INTO candidates
                 (cand_id, job_id, candidate_json, score_json)
                 VALUES (?, ?, ?, ?)
             """, (cand_id, job_id, candidate_json, score_json))

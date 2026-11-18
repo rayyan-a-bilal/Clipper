@@ -6,44 +6,15 @@ import json
 import os
 import subprocess
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from src.clipper.models import AudioInfo, ProbeResult, ProxyInfo
+from ..models import AudioInfo, ProbeResult, ProxyInfo
 
 
 class MediaError(Exception):
     """Custom exception for media operations."""
     pass
-
-
-@dataclass
-class ProbeResult:
-    duration_s: float
-    width: int
-    height: int
-    fps: float
-    vcodec: str
-    acodec: str | None
-    has_audio: bool
-    size_bytes: int
-
-
-@dataclass
-class ProxyInfo:
-    width: int
-    height: int
-    fps: float
-    path: str
-
-
-@dataclass
-class AudioInfo:
-    sample_rate: int
-    channels: int
-    duration_s: float
-    path: str
 
 
 class MediaAdapter(ABC):
@@ -89,12 +60,14 @@ class FFmpegMediaAdapter(MediaAdapter):
 
             if process.returncode != 0:
                 stderr_text = process.stderr.decode('utf-8', errors='ignore')[-2000:]
-                raise MediaError(f"FFmpeg failed with code {process.returncode}: {stderr_text}")
+                raise MediaError(
+                    f"FFmpeg failed with code {process.returncode}: {stderr_text}"
+                )
 
-        except subprocess.TimeoutExpired:
-            raise MediaError(f"FFmpeg timed out after {timeout} seconds")
-        except FileNotFoundError:
-            raise MediaError("FFmpeg not found. Please install ffmpeg.")
+        except subprocess.TimeoutExpired as e:
+            raise MediaError(f"FFmpeg timed out after {timeout} seconds") from e
+        except FileNotFoundError as e:
+            raise MediaError("FFmpeg not found. Please install ffmpeg.") from e
 
     def _run_ffprobe(self, cmd: list, timeout: int = 60) -> dict[str, Any]:
         """Run ffprobe command with error handling."""
@@ -110,17 +83,21 @@ class FFmpegMediaAdapter(MediaAdapter):
 
             if process.returncode != 0:
                 stderr_text = process.stderr.decode('utf-8', errors='ignore')[-2000:]
-                raise MediaError(f"FFprobe failed with code {process.returncode}: {stderr_text}")
+                raise MediaError(
+                    f"FFprobe failed with code {process.returncode}: {stderr_text}"
+                )
 
             output = process.stdout.decode('utf-8')
             return json.loads(output)
 
-        except subprocess.TimeoutExpired:
-            raise MediaError(f"FFprobe timed out after {timeout} seconds")
-        except FileNotFoundError:
-            raise MediaError("FFprobe not found. Please install ffprobe (part of ffmpeg).")
+        except subprocess.TimeoutExpired as e:
+            raise MediaError(f"FFprobe timed out after {timeout} seconds") from e
+        except FileNotFoundError as e:
+            raise MediaError(
+                "FFprobe not found. Please install ffprobe (part of ffmpeg)."
+            ) from e
         except json.JSONDecodeError as e:
-            raise MediaError(f"Failed to parse ffprobe output: {e}")
+            raise MediaError(f"Failed to parse ffprobe output: {e}") from e
 
     def probe(self, path: str) -> ProbeResult:
         """Probe a media file to get metadata."""
@@ -128,6 +105,7 @@ class FFmpegMediaAdapter(MediaAdapter):
             raise MediaError(f"Source file does not exist: {path}")
 
         info = self._run_ffprobe([
+            "-i", path,
             "-show_format",
             "-show_streams"
         ])
@@ -190,18 +168,14 @@ class FFmpegMediaAdapter(MediaAdapter):
 
     def make_proxy(self, src: str, dst: str) -> ProxyInfo:
         """Create a proxy video file."""
-        # Build ffmpeg filter chain for proxy
-        filter_chain = [
+        # Filter chain for proxy: fit within 960x540, then force even dimensions
+        vf_chain = ",".join([
             "scale=960:540:force_original_aspect_ratio=decrease",
-            "scale=trunc(iw/2)*2:trunc(ih/2)*2",  # ensure even dimensions
-            "-r", "15",
-            "-an",  # no audio
-            "-c:v", "libx264",
-            "-preset", "veryfast",
-            "-crf", "23"
-        ]
+            "scale=trunc(iw/2)*2:trunc(ih/2)*2"
+        ])
 
-        cmd = filter_chain + ["-i", src, "-vcodec", "libx264", "-preset", "veryfast", "-crf", "23", dst]
+        cmd = ["-i", src, "-vf", vf_chain, "-r", "15", "-an",
+               "-c:v", "libx264", "-preset", "veryfast", "-crf", "23", dst]
 
         self._run_ffmpeg(cmd, input_path=src, timeout=1800)
 

@@ -72,4 +72,18 @@ M2 (Complete) - Transcription
 - word_idx tracking corrected to use the index at each split point
 - All tests in tests/test_sentences.py pass (6/6), CPU-only, no model dependencies
 
-**Current status: M2 complete. Next: M3 (Scene analysis).**
+M1 re-verification + fixes (2026-11-18) - first real-video run exposed 4 latent bugs, all fixed:
+- media.probe(): ffprobe was invoked without `-i <path>` (probe stage always crashed)
+- media.make_proxy(): scale filters were passed as top-level CLI options; now one proper `-vf` chain
+- cli.py: generic `except Exception` swallowed the command's own `typer.Exit(0)` ("Error: 0", exit 1); added `except typer.Exit: raise`
+- stages/ingest.py: failed jobs could never be retried (early-return on `rowcount == 0` + no stage reset); failed jobs now reset and re-run, CLI prints "Retrying failed job"
+- Verified end-to-end on real 80.8s AV1/opus video (job 72e7bb26e760466ea2ca31cc0d1ac021): ingest/probe/proxy/audio all completed; 26 CPU tests green
+
+M1+M2 verification (2026-11-18):
+- M1: 4 latent bugs fixed and pipeline verified end-to-end on a real 80.8s AV1/opus video (details in milestones.md)
+- M2: transcription glue fixed (`stages/transcribe.py`, `scripts/transcribe_job.py`, `clipper.models` re-exports, ctranslate2 4.9 API fixes in `FasterWhisperASR`; note `adapters/media.py` had a `src.`-style import that also broke script launches)
+- M2 verified on real audio: job `72e7bb26e760466ea2ca31cc0d1ac021` transcribed (152 words, 22 sentences) and artifacts validated against the M2 spec
+- **IMPORTANT**: GPUs 0–2 are occupied by an Ollama LLM — do NOT run GPU tests. ASR defaults are `device="cpu"`, `compute_type="int8"`; restore `cuda:0` / `float16` via config/env when GPU0 is free
+- 26 CPU tests green; touched files ruff-clean
+
+**Current status: M0, M1, M2 all complete and verified on real media. Next: M3 (Scene analysis) — awaiting instructions.**

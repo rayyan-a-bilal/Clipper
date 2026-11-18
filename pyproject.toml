@@ -42,6 +42,13 @@ include = ["clipper*"]
 [tool.ruff]
 line-length = 88
 target-version = "py311"
+extend-exclude = [
+    "get-pip.py",
+    "test_m2b.py",
+    "verify_m2a.py",
+    "manual_verify.py",
+    "debug_gap.py",
+]
 
 [tool.ruff.lint]
 select = [
@@ -54,6 +61,10 @@ select = [
     "C4",
     "T20",
 ]
+
+[tool.ruff.lint.per-file-ignores]
+# Manual runner scripts legitimately print to the console
+"scripts/*.py" = ["T201"]
 
 [tool.pytest.ini_options]
 markers = [

@@ -39,7 +39,7 @@ def doctor():
         typer.echo("✓ Configuration loaded successfully")
     except Exception as e:
         typer.echo(f"✗ Failed to load configuration: {e}")
-        raise typer.Exit(1)
+        raise typer.Exit(1) from e
 
     # Check data directory
     try:
@@ -48,7 +48,7 @@ def doctor():
         typer.echo("✓ Data directory is accessible")
     except Exception as e:
         typer.echo(f"✗ Data directory inaccessible: {e}")
-        raise typer.Exit(1)
+        raise typer.Exit(1) from e
 
     # Check database
     try:
@@ -57,7 +57,7 @@ def doctor():
         typer.echo(f"✓ Database initialized (schema version {version})")
     except Exception as e:
         typer.echo(f"✗ Failed to connect to database: {e}")
-        raise typer.Exit(1)
+        raise typer.Exit(1) from e
 
     # Check devices
     try:
@@ -68,9 +68,12 @@ def doctor():
             gpus = device_info["nvidia"]["gpus"]
             typer.echo(f"✓ NVIDIA GPUs detected: {len(gpus)} GPU(s)")
             for gpu in gpus:
-                typer.echo(f"  - GPU {gpu['index']}: {gpu['name']} ({gpu['memory_total']} MB)")
+                label = f"GPU {gpu['index']}: {gpu['name']} ({gpu['memory_total']} MB)"
+            typer.echo(f"  - {label}")
         else:
-            typer.echo("⚠ No NVIDIA GPUs available (this is okay for CPU-only processing)")
+            typer.echo(
+                "⚠ No NVIDIA GPUs available (this is okay for CPU-only processing)"
+            )
 
         if "ffmpeg" in device_info and device_info["ffmpeg"].get("ffmpeg_available"):
             typer.echo("✓ FFmpeg detected")
@@ -82,7 +85,7 @@ def doctor():
 
     except Exception as e:
         typer.echo(f"✗ Device detection error: {e}")
-        raise typer.Exit(1)
+        raise typer.Exit(1) from e
 
     # Check fonts directory
     fonts_dir = Path("./assets/fonts")
@@ -147,9 +150,11 @@ def ingest(
 
         raise typer.Exit(0)
 
+    except typer.Exit:
+        raise
     except Exception as e:
         typer.echo(f"Error: {e}")
-        raise typer.Exit(1)
+        raise typer.Exit(1) from e
 
 @app.command()
 def run(

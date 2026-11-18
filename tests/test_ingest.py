@@ -10,6 +10,7 @@ import pytest
 from src.clipper.adapters.media import FixtureMediaAdapter
 from src.clipper.config import Config
 from src.clipper.db import Database
+from src.clipper.stages import StageError
 from src.clipper.stages.ingest import compute_content_hash, run_ingest
 
 
@@ -59,7 +60,7 @@ def test_run_ingest_with_fixture_adapter():
             adapter = FixtureMediaAdapter()
 
             # Run ingest on a fake source that doesn't exist (should fail gracefully)
-            with pytest.raises(Exception):  # Will raise an error since file not found
+            with pytest.raises(StageError):  # missing file -> StageError
                 job_id, is_new, should_retry = run_ingest(
                     source="nonexistent.mp4",
                     client="test_client",
@@ -89,7 +90,7 @@ def test_run_ingest_with_mocked_probe():
             # Test with fixture adapter that has no audio (should fail at probe stage)
             adapter = FixtureMediaAdapter(has_audio=False)
 
-            with pytest.raises(Exception):
+            with pytest.raises(StageError):
                 # This should raise a StageError because there's no audio
                 job_id, is_new, should_retry = run_ingest(
                     source="/fake/path.mp4",

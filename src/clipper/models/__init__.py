@@ -2,8 +2,8 @@
 Data models for clipper pipeline.
 """
 
-from enum import Enum
-from typing import Literal, Tuple
+from enum import StrEnum
+from typing import Literal
 
 from pydantic import BaseModel
 
@@ -31,7 +31,7 @@ class FaceTrack(BaseModel):
     persistence: float
     corner_affinity: Literal["tl", "tr", "bl", "br"] | None
 
-class Layout(str, Enum):
+class Layout(StrEnum):
     center_crop = "center_crop"
     face_track = "face_track"
     split_screen = "split_screen"
@@ -109,7 +109,9 @@ class ClipPlan(BaseModel):
     hook_overlay: str
     description: str
     hashtags: list[str]
-    status: Literal["pending_qc", "approved", "rejected", "rendered", "exported"] = "pending_qc"
+    status: Literal[
+        "pending_qc", "approved", "rejected", "rendered", "exported"
+    ] = "pending_qc"
 
 class Job(BaseModel):
     job_id: str
@@ -118,3 +120,10 @@ class Job(BaseModel):
     niche: str
     state: Literal["queued", "running", "awaiting_qc", "done", "failed"]
     stages: dict[str, str]
+
+
+# Re-export transcript artifacts (defined in transcript_artifacts.py, which
+# Re-export artifacts (defined in transcript_artifacts.py, which imports the
+# base classes above, so this must stay at the end of the module)
+from .transcript_artifacts import SentencesArtifact as SentencesArtifact  # noqa: E402
+from .transcript_artifacts import WordsArtifact as WordsArtifact  # noqa: E402
