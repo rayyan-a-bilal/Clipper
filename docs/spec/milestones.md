@@ -59,6 +59,23 @@ M2 verification on real audio (2026-11-18) — COMPLETE:
 Next: M3b (PySceneDetect, opencv-python-headless only) per your instructions.
 Known minor gaps: `clipper run` CLI command is still a stub (use `python scripts/transcribe_job.py <job-id>`)
 
+## M3b - Shot/Silence/Energy Analysis Stage (Complete)
+- `PySceneDetectAdapter` (`adapters/scenes.py`): lazy `scenedetect`/`cv2` imports, `detect()` + `ContentDetector(threshold=27.0)`, contiguous clamped shots over `[0, duration]`, `SceneError`, `get_scene_adapter()` factory (monkeypatchable)
+- `stages/analyze.py`: `run_analysis(job_id, cfg, conn, media, scenes)` — shots → silence → energy; skip only when stage state=`done` + artifact exists + `schema_version==1`; job `queued→running→queued`, failure marks stage `failed` + job `failed` and raises clean `StageError`; energy reads WAV via stdlib `wave` (validates 16kHz mono pcm_s16le) + `rms_windows`
+- `scripts/analyze_job.py`: mirror of `transcribe_job.py`; prints job/shots/silence/energy counts + artifact paths; exit 0/1
+- 11 new tests (`tests/test_analysis_stage.py`) incl. guarded real integration test; `tests/fixtures/sample.mp4` regenerated (6s two-segment tone fixture, prior file was corrupt)
+- Dependencies: `scenedetect` + `opencv-python-headless` (install scenedetect with `--no-deps`; opencv-python NEVER; `pip check` false-positive expected)
+- Acceptance: 58 CPU tests green (`pytest -m "not gpu"`), `ruff check .` clean
+- Verified on real media (job `72e7bb...`): 12 shots / 22 silence regions / 162 energy windows, re-run idempotent
+- Scope: no faces/layouts/candidates/worker/web (M4/M6), M4 not started
+
+## Current Status (updated for M3b)
+- M0, M1, M2: complete and verified end-to-end on real media
+- M3a: complete — analysis foundations (contracts, pure logic, fixture adapters)
+- M3b: complete — real detectors wired, analysis stage + script, verified on fixture and real video; **M3 done**
+
+Next: M4 (clip candidates generation) — awaiting instructions.
+
 (Prior note about pre-existing E501s in db.py / sentences.py / tests/test_doctor.py: cleared as part of M3a — `ruff check .` is now fully clean.)
 
 ## M2 - Transcription

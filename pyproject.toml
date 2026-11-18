@@ -23,6 +23,16 @@ dependencies = [
     "PyYAML",
     "filelock",
     "numpy",
+    "click",
+    "tqdm",
+    # NOTE: install scenedetect with `pip install scenedetect --no-deps` and
+    # provide cv2 via opencv-python-headless below. scenedetect>=0.7 declares
+    # opencv-python as a dependency; the headless build is binary-compatible
+    # (same `cv2` namespace) and opencv-python is FORBIDDEN on this headless
+    # server (fails with libGL.so.1). `pip check` reports a false-positive
+    # requirement warning for this pair — that is expected.
+    "scenedetect",
+    "opencv-python-headless",
     "pytest",
     "ruff",
 ]
