@@ -86,4 +86,16 @@ M1+M2 verification (2026-11-18):
 - **IMPORTANT**: GPUs 0–2 are occupied by an Ollama LLM — do NOT run GPU tests. ASR defaults are `device="cpu"`, `compute_type="int8"`; restore `cuda:0` / `float16` via config/env when GPU0 is free
 - 26 CPU tests green; touched files ruff-clean
 
-**Current status: M0, M1, M2 all complete and verified on real media. Next: M3 (Scene analysis) — awaiting instructions.**
+M3a - Analysis Foundations (Complete)
+The following components have been implemented:
+- `docs/spec/m3.md` — fixed decisions for M3 (CPU-only, inputs, stage names, artifacts, constants, silence/energy/shots rules, job states, M3b constraints)
+- New contracts (`src/clipper/models/analysis_artifacts.py`, schema_version=1, re-exported from `clipper.models`): `SilenceRegion`, `EnergyWindow`, `ShotsArtifact`, `SilenceArtifact`, `EnergyArtifact` (existing contracts untouched)
+- Pure CPU logic (`src/clipper/audio_analysis.py`): `parse_silence_log(text, duration_s)` and `rms_windows(samples, sample_rate, window_s)` — no I/O, no ffmpeg, no heavy libs beyond numpy
+- Module-level constants (no config changes): `SILENCE_NOISE_DB=-35.0`, `SILENCE_MIN_DUR=0.5`, `ENERGY_WINDOW_S=0.5` (audio_analysis.py), `SHOT_THRESHOLD=27.0` (adapters/scenes.py)
+- `adapters/media.py`: `detect_silence()` added to `MediaAdapter` + `FFmpegMediaAdapter` (fixed silencedetect command, 600s timeout, `MediaError` on failure) and `FixtureMediaAdapter` (configurable canned regions, default one region)
+- New `adapters/scenes.py`: `SceneAdapter` protocol + `FixtureSceneAdapter` (default single full-duration shot); NO PySceneDetect yet (M3b, must use opencv-python-headless)
+- Dependency added: numpy only (scenedetect/opencv explicitly deferred to M3b)
+- 21 new CPU-only tests (`tests/test_analysis.py`); 47 total tests green, `ruff check .` clean (also cleared 16 pre-existing E501s in db.py/sentences.py/tests)
+- M3a scope respected: no PySceneDetect integration, no analysis stage/script, no faces/layouts/candidates (M4/M6)
+
+**Current status: M0, M1, M2 complete and verified on real media. M3a complete (CPU-only foundations + fixture adapters). Next: M3b (real detectors) — awaiting instructions.**

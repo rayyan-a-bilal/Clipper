@@ -54,9 +54,12 @@ M2 verification on real audio (2026-11-18) — COMPLETE:
 ## Current Status (2026-11-18)
 - M0, M1: complete and verified end-to-end on real media
 - M2: complete and verified — first real faster-whisper transcription done and validated (26 CPU tests green, touched files ruff-clean)
+- M3a: complete — analysis foundations (contracts, pure logic, fixture adapters; 47 CPU tests green, ruff clean) per `docs/spec/m3.md`
 
-Next: start M3 (Scene analysis) per your instructions.
-Known minor gaps: `clipper run` CLI command is still a stub (use `python scripts/transcribe_job.py <job-id>`); a handful of pre-existing E501s remain in untouched files (db.py, cli.py, etc.)
+Next: M3b (PySceneDetect, opencv-python-headless only) per your instructions.
+Known minor gaps: `clipper run` CLI command is still a stub (use `python scripts/transcribe_job.py <job-id>`)
+
+(Prior note about pre-existing E501s in db.py / sentences.py / tests/test_doctor.py: cleared as part of M3a — `ruff check .` is now fully clean.)
 
 ## M2 - Transcription
 - ASR integration (faster-whisper)
@@ -64,12 +67,25 @@ Known minor gaps: `clipper run` CLI command is still a stub (use `python scripts
 - VAD filtering
 - Audio quality checks
 
-## M3 - Scene analysis  
-- PySceneDetect shot detection
-- Silence detection
-- RMS energy analysis
-- Face detection on CPU
-- Face tracking across frames
+## M3a - Analysis Foundations (Complete)
+- Fixed decisions in `docs/spec/m3.md`: CPU-only analysis; inputs proxy.mp4 + audio.wav from M1; independent of M2 transcript artifacts; stage names shots/silence/energy; artifacts shots.json / silence.json / energy.json (schema_version=1); job states queued -> running -> queued on success, failed on error
+- Module-level constants (no config changes): SHOT_THRESHOLD=27.0 (ContentDetector, M3b), SILENCE_NOISE_DB=-35.0, SILENCE_MIN_DUR=0.5, ENERGY_WINDOW_S=0.5
+- Contracts (new file `models/analysis_artifacts.py`, existing contracts untouched): `SilenceRegion{start,end}`, `EnergyWindow{start,end,rms_db}`, `ShotsArtifact{schema_version,shots}`, `SilenceArtifact{schema_version,noise_db=-35.0,min_dur=0.5,regions}`, `EnergyArtifact{schema_version,window_s=0.5,windows}`; re-exported from `clipper.models`
+- Pure logic `audio_analysis.py` (no I/O, no ffmpeg, numpy only): `parse_silence_log` (pairs silence_start/end, trailing unpaired start closes at duration, clamps to [0,duration], ignores malformed lines) and `rms_windows` (non-overlapping 0.5s tiling, partial final window only if >=0.1s, rms_db=20*log10(max(rms,1e-6)) -> -120.0 dB floor)
+- `MediaAdapter.detect_silence()` abstract method + `FFmpegMediaAdapter.detect_silence` (ffmpeg -hide_banner -nostats -af silencedetect, 600s timeout, MediaError on failure) + `FixtureMediaAdapter.detect_silence` (canned, default one region)
+- New `adapters/scenes.py`: `SceneAdapter.detect_shots(video_path, duration_s) -> list[Shot]` + `FixtureSceneAdapter` (default single shot spanning full duration)
+- Scope discipline: NO PySceneDetect/opencv/scenedetect yet (M3b — and it MUST use opencv-python-headless, never opencv-python); NO analysis stage/script; NO faces/layouts/candidates (M4/M6)
+- Dependency: numpy added only
+- Tests: 21 new CPU-only tests in tests/test_analysis.py (contracts round-trip, parse_silence_log, rms_windows, fixtures); 47 total green
+- Ruff: fixed 16 pre-existing E501s (db.py, sentences.py, tests/test_doctor.py); `ruff check .` clean
+
+## M3 - Scene analysis  (M3b/M3c pending — awaiting instructions)
+- [x] M3a: contracts, pure logic, fixture adapters
+- [ ] M3b: PySceneDetect shot detection (opencv-python-headless only)
+- [ ] M3c: analysis stage (shots/silence/energy) + run script, job states
+- RMS energy analysis (logic done in M3a; stage pending)
+- Face detection on CPU (deferred to M4/M6)
+- Face tracking across frames (deferred to M4/M6)
 
 ## M4 - Clip candidates generation
 - Candidate window generation

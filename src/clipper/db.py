@@ -123,7 +123,10 @@ class Database:
         if version < 2:
             try:
                 cursor.execute("ALTER TABLE jobs ADD COLUMN content_hash TEXT")
-                cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_jobs_content_hash ON jobs(content_hash)")
+                cursor.execute(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS idx_jobs_content_hash "
+                    "ON jobs(content_hash)"
+                )
                 self.set_schema_version(2)
             except Exception:
                 # Migration already applied or failed, check
@@ -149,7 +152,8 @@ class Database:
         try:
             timestamp = datetime.now().isoformat()
             cursor.execute(
-                "INSERT OR REPLACE INTO schema_migrations (version, applied_at) VALUES (?, ?)",
+                "INSERT OR REPLACE INTO schema_migrations "
+                "(version, applied_at) VALUES (?, ?)",
                 (version, timestamp)
             )
             conn.commit()
@@ -177,7 +181,9 @@ class Database:
         finally:
             conn.close()
 
-    def create_job(self, job_id: str, source_path: str, client: str, niche: str) -> bool:
+    def create_job(
+        self, job_id: str, source_path: str, client: str, niche: str
+    ) -> bool:
         """Create a new job."""
         conn = self.get_connection()
         cursor = conn.cursor()
@@ -220,7 +226,9 @@ class Database:
         conn = self.get_connection()
         cursor = conn.cursor()
         try:
-            cursor.execute("SELECT * FROM stages WHERE job_id = ? ORDER BY name", (job_id,))
+            cursor.execute(
+                "SELECT * FROM stages WHERE job_id = ? ORDER BY name", (job_id,)
+            )
             return [dict(row) for row in cursor.fetchall()]
         finally:
             conn.close()
@@ -239,7 +247,9 @@ class Database:
         finally:
             conn.close()
 
-    def create_stage(self, job_id: str, stage_name: str, state: str = "pending") -> bool:
+    def create_stage(
+        self, job_id: str, stage_name: str, state: str = "pending"
+    ) -> bool:
         """Create a new stage for a job."""
         conn = self.get_connection()
         cursor = conn.cursor()
@@ -258,8 +268,14 @@ class Database:
         finally:
             conn.close()
 
-    def update_stage(self, job_id: str, stage_name: str, state: str,
-                     artifact_path: str | None = None, error: str | None = None) -> bool:
+    def update_stage(
+        self,
+        job_id: str,
+        stage_name: str,
+        state: str,
+        artifact_path: str | None = None,
+        error: str | None = None,
+    ) -> bool:
         """Update a stage state."""
         conn = self.get_connection()
         cursor = conn.cursor()
@@ -291,7 +307,9 @@ class Database:
         finally:
             conn.close()
 
-    def create_clip(self, clip_id: str, job_id: str, plan_json: str, status: str = "pending_qc") -> bool:
+    def create_clip(
+        self, clip_id: str, job_id: str, plan_json: str, status: str = "pending_qc"
+    ) -> bool:
         """Create a new clip."""
         conn = self.get_connection()
         cursor = conn.cursor()
@@ -344,12 +362,17 @@ class Database:
         conn = self.get_connection()
         cursor = conn.cursor()
         try:
-            cursor.execute("SELECT * FROM clips WHERE job_id = ? ORDER BY created_at DESC", (job_id,))
+            cursor.execute(
+                "SELECT * FROM clips WHERE job_id = ? ORDER BY created_at DESC",
+                (job_id,),
+            )
             return [dict(row) for row in cursor.fetchall()]
         finally:
             conn.close()
 
-    def create_candidate(self, cand_id: str, job_id: str, candidate_json: str, score_json: str) -> bool:
+    def create_candidate(
+        self, cand_id: str, job_id: str, candidate_json: str, score_json: str
+    ) -> bool:
         """Create a new candidate."""
         conn = self.get_connection()
         cursor = conn.cursor()

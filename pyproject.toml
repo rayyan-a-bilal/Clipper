@@ -22,6 +22,7 @@ dependencies = [
     "pydantic-settings",
     "PyYAML",
     "filelock",
+    "numpy",
     "pytest",
     "ruff",
 ]
