@@ -101,6 +101,23 @@ Next: M4b (candidates pipeline stage + run script) per instructions; M5 (LLM sco
 
 (Prior note about pre-existing E501s in db.py / sentences.py / tests/test_doctor.py: cleared as part of M3a — `ruff check .` is now fully clean.)
 
+## M4b - Candidates Stage Wiring (Complete)
+- `stages/candidates.py`: `run_candidates(job_id, cfg, conn)` — single `candidates` stage wiring the M4a pure `generate_candidates`; requires `sentences.json` (M2b, `scripts/transcribe_job.py`) and `energy.json`/`silence.json` (M3b, `scripts/analyze_job.py`); missing input fails with a clean `StageError` naming the artifact AND the milestone stage/script that produces it; each input validated for `schema_version == 1` (clean failure on mismatch) and as its typed model; niche keywords resolved from `cfg.clips.niche_keywords[job.niche]` (neutral 0.5 when unset)
+- Writes `candidates.json` as `CandidatesArtifact` (`model_dump_json(indent=2)` + newline — the same canonical form as the M4a golden fixture; byte-identical across runs; deterministic ordering from M4a)
+- Upsert into the EXISTING `candidates` table (no migration): `cand_id, job_id, candidate_json = Candidate.model_dump_json()`, `score_json = NULL` (M5 fills this); the job's rows are replaced on each real (non-skipped) run so retries are exact
+- Skip only when DB stage state=`done` AND artifact exists AND `schema_version == 1`; on success mark stage `done` (started/finished timestamps + artifact_path), job `queued→running→queued`; on failure mark stage `failed` + error text, job `failed`, raise clean `StageError`; retry after failure works
+- Zero candidates is a VALID success (empty artifact, no `candidates` rows, stage done)
+- `scripts/candidates_job.py` (mirrors `analyze_job.py`): argparse JOB_ID; prints job id, candidate count and the top 5 as `[start-end] duration score first-words-preview` + artifact path; exit 0 success (incl. zero candidates), exit 1 clean error
+- `stages/__init__.py` re-exports `run_candidates`
+- Tests `tests/test_candidates_stage.py` (14 new, CPU-only, temp DB, M4a fixtures): artifact+stage row+candidate rows (`score_json NULL`, `cand_id` job prefix, one row per candidate); second run skips (no rewrite, stage row unchanged); byte-identical `candidates.json` across two fresh runs; missing sentences/energy/silence each fail with the correct milestone hint; `schema_version` mismatch fails cleanly; missing job fails cleanly; zero-candidate input succeeds (empty artifact, zero rows); failure→retry succeeds; `clips.niche_keywords[job.niche]` changes the pre-rank vs neutral; script success/missing-job/failure exit codes
+- Acceptance: `pytest -m "not gpu"` 113 passed (99 prior + 14 new); `ruff check .` clean
+- M4b scope respected: NO LLM scoring / selection / cut snapping (M5); M4a constants/formulas untouched
+
+## Current Status (updated for M4b)
+- M0, M1, M2, M3a, M3b, M4a, M4b complete
+- M3 fully done; M4 pipeline stage done — `candidates.json` + `candidates` table rows are produced and skip-deterministic; `score_json` awaits M5
+- Next: M5 (LLM scoring into `score_json`, selection) — STOP after M4b per instructions
+
 ## M2 - Transcription
 - ASR integration (faster-whisper)
 - Word timestamps
@@ -129,10 +146,10 @@ Next: M4b (candidates pipeline stage + run script) per instructions; M5 (LLM sco
 
 ## M4 - Clip candidates generation
 - [x] M4a: candidate-generation foundations (contract, config, pure logic, fixtures, tests)
-- [ ] M4b: candidates pipeline stage + run script (wire config `clips.niche_keywords`)
+- [x] M4b: candidates pipeline stage + run script (wires config `clips.niche_keywords`)
 - Candidate window generation (M4a logic done)
 - Heuristic scoring (M4a done)
-- Candidate stage storage and retrieval (M4b)
+- Candidate stage storage and retrieval (M4b done — `candidates.json` + `candidates` table, `score_json` NULL for M5)
 - Window filtering (M4a logic done)
 
 ## M5 - LLM scoring
