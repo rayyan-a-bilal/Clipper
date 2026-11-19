@@ -2,16 +2,18 @@
 
 Clipper is a local, headless video clipping pipeline designed for content creation workflows. It processes video files through multiple stages including probing, proxy generation, audio extraction, and candidate analysis.
 
-## 📍 Current Status (2026-11-18)
+## 📍 Current Status (2026-11-19)
 
 | Milestone | State |
 |---|---|
 | M0 – Scaffold & CLI | ✅ complete |
 | M1 – Ingest pipeline | ✅ complete, verified end-to-end on real video (probe/proxy/audio) |
 | M2 – Transcription | ✅ complete, verified on real audio (152 words / 22 sentences, validated) |
-| M3+ – Scene analysis etc. | ⏳ not started |
+| M3 – Scene analysis (shots/silence/energy) | ✅ complete, verified on real video |
+| M4 – Clip candidates (M4a foundations + M4b stage) | ✅ complete, verified on real video (candidates pre-ranked, skip-deterministic) |
+| M5+ – LLM scoring, selection, cuts | ⏳ not started |
 
-Notes: ASR currently runs on **CPU int8** (GPUs 0–2 occupied by another workload) — when GPU0 frees up set `CLIPPER_ASR_DEVICE=cuda:0` + `CLIPPER_ASR_COMPUTE_TYPE=float16`. `clipper run --job-id` is still a stub; use `python scripts/transcribe_job.py <job-id>`. Full progress: `docs/spec/milestones.md`, open items: `BLOCKED.md`.
+Notes: ASR currently runs on **CPU int8** (GPUs 0–2 occupied by another workload) — when GPU0 frees up set `CLIPPER_ASR_DEVICE=cuda:0` + `CLIPPER_ASR_COMPUTE_TYPE=float16`. `clipper run --job-id` is still a stub; run per-job scripts instead: `python scripts/transcribe_job.py <job-id>` (M2), `python scripts/analyze_job.py <job-id>` (M3), `python scripts/candidates_job.py <job-id>` (M4). Full progress: `docs/spec/milestones.md`, open items: `BLOCKED.md`.
 
 ## 🚀 Features
 
@@ -70,6 +72,14 @@ python -m ruff check .
 ```bash
 python -m clipper ingest --source-path <path-to-video> --client <client-name> --niche <niche-topic>
 ```
+
+### Per-Job Pipeline (M2/M3/M4)
+```bash
+python scripts/transcribe_job.py <job-id>    # transcribe + sentences (M2)
+python scripts/analyze_job.py <job-id>      # shots + silence + energy (M3)
+python scripts/candidates_job.py <job-id>   # pre-ranked clip candidates (M4)
+```
+Each script skips already-completed stages, is deterministic, and exits 0 on success / 1 on clean error.
 
 ## 📁 Project Structure
 

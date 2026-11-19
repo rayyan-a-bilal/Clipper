@@ -1,8 +1,8 @@
 # Clipper - Local, Headless Video Clipping Pipeline
 
-Clipper is a local, headless video clipping pipeline designed for content creation workflows. It processes video files through multiple stages: probe, proxy generation, audio extraction, transcription, and shot/silence/energy analysis (the basis for clip candidate selection).
+Clipper is a local, headless video clipping pipeline designed for content creation workflows. It processes video files through multiple stages: probe, proxy generation, audio extraction, transcription, shot/silence/energy analysis, and pre-ranked clip candidate generation.
 
-## Current Status (2026-11-18)
+## Current Status (2026-11-19)
 
 | Milestone | State |
 |---|---|
@@ -10,7 +10,8 @@ Clipper is a local, headless video clipping pipeline designed for content creati
 | M1 – Ingest pipeline | ✅ complete, verified end-to-end on real video (probe/proxy/audio) |
 | M2 – Transcription | ✅ complete, verified on real audio (152 words / 22 sentences, validated) |
 | M3 – Scene analysis (M3a foundations + M3b analysis stage) | ✅ complete, verified on real video (12 shots / 22 silence regions / 162 energy windows) |
-| M4+ – Clip candidates, scoring, cuts | ⏳ not started |
+| M4 – Clip candidates (M4a foundations + M4b candidates stage) | ✅ complete, verified on real video (4 candidates pre-ranked, skip-deterministic) |
+| M5+ – LLM scoring, selection, cuts | ⏳ not started |
 
 Notes:
 - ASR currently runs on **CPU int8** — GPUs 0–2 are occupied by another workload. When GPU0 is free: set `CLIPPER_ASR_DEVICE=cuda:0` and `CLIPPER_ASR_COMPUTE_TYPE=float16` (or edit `ASRConfig` defaults in `src/clipper/config.py`) — analysis (M3) is always CPU-only
@@ -83,6 +84,16 @@ python scripts/analyze_job.py <job-id>
 - **silence** — ffmpeg `silencedetect=noise=-35dB:d=0.5` on `audio.wav`
 - **energy** — 0.5s RMS windows from `audio.wav` (16kHz mono pcm_s16le validated; silent windows clamp at −120.0 dB)
 
+### Generate Clip Candidates (M4)
+Runs the `candidates` stage: pre-ranks 3–8 sentence windows (15–75s) from M2 `sentences.json` + M3 `energy.json`/`silence.json` (hook/density/energy/silence/niche features → `cheap_score` PRE-RANK, greedy NMS, top 20), writes `candidates.json` and the `candidates` table (`score_json` stays NULL until M5):
+```bash
+python scripts/candidates_job.py <job-id>
+# prints job id, candidate count, top 5 as [start-end] duration score first-words-preview, artifact path
+# requires M2b (sentences.json) and M3b (energy.json, silence.json) artifacts
+# niche keywords: configure clips.niche_keywords[job.niche] in config.yaml (neutral 0.5 when unset)
+# artifact: data/jobs/<job-id>/candidates.json (schema_version 1); skipped when already done; exits 0/1
+```
+
 ## Project Structure
 
 - `src/clipper/` - Core application code
@@ -90,14 +101,16 @@ python scripts/analyze_job.py <job-id>
   - `config.py` - Configuration management
   - `db.py` - Database operations  
   - `devices.py` - Device detection and management
-  - `stages/` - Pipeline stage implementations (`ingest`, `transcribe`, `analyze`)
+  - `stages/` - Pipeline stage implementations (`ingest`, `transcribe`, `analyze`, `candidates`)
   - `adapters/` - Media processing adapters (`media`, `asr`, `scenes` — all with CPU-only fixtures)
   - `models/` - Data models and artifact contracts
   - `audio_analysis.py` - Pure CPU silence parsing + RMS windowing
+  - `candidates.py` - Pure CPU candidate windowing + `cheap_score` pre-rank (M4a)
 
 - `tests/` - Test suite
 - `scripts/transcribe_job.py` - M2 transcription runner
 - `scripts/analyze_job.py` - M3 analysis runner
+- `scripts/candidates_job.py` - M4 candidates runner
 - `scripts/make_fixtures.py` - Script to create test fixtures
 
 ## Development
