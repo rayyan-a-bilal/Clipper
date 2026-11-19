@@ -73,8 +73,31 @@ Known minor gaps: `clipper run` CLI command is still a stub (use `python scripts
 - M0, M1, M2: complete and verified end-to-end on real media
 - M3a: complete — analysis foundations (contracts, pure logic, fixture adapters)
 - M3b: complete — real detectors wired, analysis stage + script, verified on fixture and real video; **M3 done**
+- M4a: complete — candidate-generation foundations (see below)
 
-Next: M4 (clip candidates generation) — awaiting instructions.
+Next: M4b (candidates pipeline stage + run script) per instructions; M5 (LLM scoring) after that.
+
+(Prior note about pre-existing E501s in db.py / sentences.py / tests/test_doctor.py: cleared as part of M3a — `ruff check .` is now fully clean.)
+
+## M4a - Candidate Generation Foundations (Complete)
+- Fixed decisions recorded in `docs/spec/m4.md`: `cheap_score` is a PRE-RANK (not a quality verdict); inputs M2 sentences.json + M3 energy.json/silence.json; stage name `candidates`, artifact `candidates.json` (schema_version=1)
+- Module-level constants in `src/clipper/candidates.py`: MIN_CLIP_S=15.0, MAX_CLIP_S=75.0, MIN_SENTENCES=3, MAX_SENTENCES=8, STRIDE=1, TOP_K=20, NMS_IOU=0.5, W_HOOK=0.35/W_DENSITY=0.20/W_ENERGY=0.20/W_SILENCE=0.10/W_NICHE=0.15
+- Window rule: for each start idx i (stride 1) and length L in 3..8, end_idx=i+L-1; keep only if 15.0<=duration<=75.0; `sentence_range` INCLUSIVE `(start_idx,end_idx)`
+- `cand_id = f"{job_id}-c{start_idx:04d}-{end_idx:04d}"` — globally unique (job_id prefix + unique index pair) since `candidates.cand_id` is a PRIMARY KEY
+- Features (clamped [0,1]): hook (first sentence, +0.25 each of 6 classes, word-boundary keyword matching, cap 1.0), density (speech/duration), energy (population std of rms_db over windows whose MIDPOINT is in-window, /12, 0.0 if <2 windows), silence (1 - min(fraction/0.25,1)), niche (fraction of configured keywords present, neutral 0.5 when none)
+- cheap_score = clamp(weighted sum, 0,1), rounded to 6 decimals; ordering cheap_score DESC then start ASC then end ASC; greedy NMS keep if temporal IoU < 0.5, stop at TOP_K; byte-identical determinism
+- Contract (additive): `CandidatesArtifact{schema_version=1, candidates: list[Candidate]}` in `models/candidate_artifacts.py`, re-exported; existing contracts untouched
+- Config (backward compatible): `ClipsConfig.niche_keywords: dict[str, list[str]] = {}` + `clips.niche_keywords: {}` in config.yaml (commented example); existing configs load unchanged
+- `src/clipper/candidates.py`: pure `generate_candidates(...)` + helpers `hook_score/density_score/energy_score/silence_score/niche_score/cheap_score/temporal_iou/_nms/_build_windows` (no I/O)
+- Fixtures `tests/fixtures/m4/`: sentences.json (30/~271s), energy.json (542 x 0.5s), silence.json (3 regions), golden candidates.json (20 candidates, committed, byte-identical on regen)
+- Tests `tests/test_candidates.py`: 41 CPU-only tests (round-trip, window invariants, no-candidates short/long, each feature, cheap_score bounds/rounding, deterministic ordering + tie-break, NMS IoU/TOP_K, cand_id format/uniqueness, golden byte-identical, seeded property test)
+- Acceptance: `pytest -m "not gpu"` 99 passed; `ruff check .` clean
+- M4a scope respected: NO candidates stage/script yet, NO LLM scoring/selection/cut-snapping (M5), M6/M7 untouched
+
+## Current Status (updated for M4a)
+- M0, M1, M2, M3a, M3b, M4a complete
+- M3 fully done; M4 foundations done (contracts + config + pure logic + fixtures + tests)
+- Next: M4b (candidates pipeline stage + run script, job states, wiring to config `clips.niche_keywords`), then M5
 
 (Prior note about pre-existing E501s in db.py / sentences.py / tests/test_doctor.py: cleared as part of M3a — `ruff check .` is now fully clean.)
 
@@ -105,10 +128,12 @@ Next: M4 (clip candidates generation) — awaiting instructions.
 - Face tracking across frames (deferred to M4/M6)
 
 ## M4 - Clip candidates generation
-- Candidate window generation
-- Heuristic scoring
-- Candidate storage and retrieval
-- Window filtering
+- [x] M4a: candidate-generation foundations (contract, config, pure logic, fixtures, tests)
+- [ ] M4b: candidates pipeline stage + run script (wire config `clips.niche_keywords`)
+- Candidate window generation (M4a logic done)
+- Heuristic scoring (M4a done)
+- Candidate stage storage and retrieval (M4b)
+- Window filtering (M4a logic done)
 
 ## M5 - LLM scoring
 - LLM integration (OpenAI-compatible)

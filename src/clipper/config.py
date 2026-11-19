@@ -47,6 +47,9 @@ class ClipsConfig(BaseSettings):
     max_duration: float = 75.0
     overlap_threshold: float = 0.3
     hook_overlay_duration: float = 2.5
+    # M4a — niche -> keywords; empty by default (niche score falls back to
+    # neutral 0.5). Backward compatible: existing configs load unchanged.
+    niche_keywords: dict[str, list[str]] = {}
 
 class FacesConfig(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="CLIPPER_")

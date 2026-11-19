@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "noise_db": -35.0,
+  "min_dur": 0.5,
+  "regions": [
+    {
+      "start": 26.0,
+      "end": 28.0
+    },
+    {
+      "start": 99.5,
+      "end": 101.5
+    },
+    {
+      "start": 160.0,
+      "end": 163.0
+    }
+  ]
+}

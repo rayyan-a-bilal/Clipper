@@ -1,0 +1,205 @@
+{
+  "schema_version": 1,
+  "candidates": [
+    {
+      "cand_id": "job-m4-fixture-c0014-0016",
+      "start": 127.5,
+      "end": 153.0,
+      "sentence_range": [
+        14,
+        16
+      ],
+      "cheap_score": 0.817892
+    },
+    {
+      "cand_id": "job-m4-fixture-c0022-0024",
+      "start": 199.5,
+      "end": 225.0,
+      "sentence_range": [
+        22,
+        24
+      ],
+      "cheap_score": 0.817892
+    },
+    {
+      "cand_id": "job-m4-fixture-c0018-0021",
+      "start": 163.5,
+      "end": 198.0,
+      "sentence_range": [
+        18,
+        21
+      ],
+      "cheap_score": 0.81721
+    },
+    {
+      "cand_id": "job-m4-fixture-c0022-0027",
+      "start": 199.5,
+      "end": 252.0,
+      "sentence_range": [
+        22,
+        27
+      ],
+      "cheap_score": 0.814643
+    },
+    {
+      "cand_id": "job-m4-fixture-c0018-0025",
+      "start": 163.5,
+      "end": 234.0,
+      "sentence_range": [
+        18,
+        25
+      ],
+      "cheap_score": 0.813387
+    },
+    {
+      "cand_id": "job-m4-fixture-c0014-0021",
+      "start": 127.5,
+      "end": 198.0,
+      "sentence_range": [
+        14,
+        21
+      ],
+      "cheap_score": 0.796365
+    },
+    {
+      "cand_id": "job-m4-fixture-c0004-0006",
+      "start": 36.5,
+      "end": 63.0,
+      "sentence_range": [
+        4,
+        6
+      ],
+      "cheap_score": 0.731132
+    },
+    {
+      "cand_id": "job-m4-fixture-c0021-0023",
+      "start": 190.0,
+      "end": 216.0,
+      "sentence_range": [
+        21,
+        23
+      ],
+      "cheap_score": 0.730769
+    },
+    {
+      "cand_id": "job-m4-fixture-c0026-0028",
+      "start": 235.5,
+      "end": 261.0,
+      "sentence_range": [
+        26,
+        28
+      ],
+      "cheap_score": 0.730392
+    },
+    {
+      "cand_id": "job-m4-fixture-c0006-0009",
+      "start": 55.5,
+      "end": 90.0,
+      "sentence_range": [
+        6,
+        9
+      ],
+      "cheap_score": 0.72971
+    },
+    {
+      "cand_id": "job-m4-fixture-c0005-0007",
+      "start": 46.0,
+      "end": 72.0,
+      "sentence_range": [
+        5,
+        7
+      ],
+      "cheap_score": 0.72582
+    },
+    {
+      "cand_id": "job-m4-fixture-c0025-0027",
+      "start": 226.0,
+      "end": 252.0,
+      "sentence_range": [
+        25,
+        27
+      ],
+      "cheap_score": 0.722908
+    },
+    {
+      "cand_id": "job-m4-fixture-c0000-0002",
+      "start": 0.0,
+      "end": 27.0,
+      "sentence_range": [
+        0,
+        2
+      ],
+      "cheap_score": 0.72037
+    },
+    {
+      "cand_id": "job-m4-fixture-c0000-0007",
+      "start": 0.0,
+      "end": 72.0,
+      "sentence_range": [
+        0,
+        7
+      ],
+      "cheap_score": 0.718056
+    },
+    {
+      "cand_id": "job-m4-fixture-c0004-0011",
+      "start": 36.5,
+      "end": 108.0,
+      "sentence_range": [
+        4,
+        11
+      ],
+      "cheap_score": 0.715035
+    },
+    {
+      "cand_id": "job-m4-fixture-c0011-0016",
+      "start": 100.0,
+      "end": 153.0,
+      "sentence_range": [
+        11,
+        16
+      ],
+      "cheap_score": 0.714151
+    },
+    {
+      "cand_id": "job-m4-fixture-c0011-0013",
+      "start": 100.0,
+      "end": 126.0,
+      "sentence_range": [
+        11,
+        13
+      ],
+      "cheap_score": 0.707692
+    },
+    {
+      "cand_id": "job-m4-fixture-c0010-0012",
+      "start": 91.5,
+      "end": 117.0,
+      "sentence_range": [
+        10,
+        12
+      ],
+      "cheap_score": 0.69902
+    },
+    {
+      "cand_id": "job-m4-fixture-c0017-0019",
+      "start": 154.0,
+      "end": 180.0,
+      "sentence_range": [
+        17,
+        19
+      ],
+      "cheap_score": 0.684615
+    },
+    {
+      "cand_id": "job-m4-fixture-c0027-0029",
+      "start": 244.0,
+      "end": 271.0,
+      "sentence_range": [
+        27,
+        29
+      ],
+      "cheap_score": 0.643981
+    }
+  ]
+}

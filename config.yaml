@@ -24,6 +24,14 @@ clips:
   max_duration: 75.0
   overlap_threshold: 0.3
   hook_overlay_duration: 2.5
+  # M4a — niche-specific keyword lists used by the candidate "niche" feature.
+  # Empty by default (the niche feature falls back to a neutral 0.5).
+  # e.g.
+  #   niche_keywords:
+  #     fitness:
+  #       - "protein"
+  #       - "workout"
+  niche_keywords: {}
 
 faces:
   detection_fps: 3.0

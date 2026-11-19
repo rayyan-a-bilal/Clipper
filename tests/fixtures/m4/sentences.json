@@ -1,0 +1,275 @@
+{
+  "schema_version": 1,
+  "sentences": [
+    {
+      "start": 0.0,
+      "end": 9.0,
+      "text": "So why do most apps fail to convert their users after launch?",
+      "word_idx": [
+        0,
+        0
+      ]
+    },
+    {
+      "start": 10.0,
+      "end": 18.0,
+      "text": "I have interviewed 12 founders this year about their onboarding flows.",
+      "word_idx": [
+        1,
+        1
+      ]
+    },
+    {
+      "start": 19.0,
+      "end": 27.0,
+      "text": "But almost every one of them made the same three mistakes.",
+      "word_idx": [
+        2,
+        2
+      ]
+    },
+    {
+      "start": 28.0,
+      "end": 35.5,
+      "text": "The first mistake is asking for too much permission right at the start.",
+      "word_idx": [
+        3,
+        3
+      ]
+    },
+    {
+      "start": 36.5,
+      "end": 45.0,
+      "text": "Never collect the full email before you have actually earned the trust.",
+      "word_idx": [
+        4,
+        4
+      ]
+    },
+    {
+      "start": 46.0,
+      "end": 54.0,
+      "text": "When someone has to wait 4 seconds, they simply abandon the page.",
+      "word_idx": [
+        5,
+        5
+      ]
+    },
+    {
+      "start": 55.5,
+      "end": 63.0,
+      "text": "Actually, most users give you only one second to decide for them.",
+      "word_idx": [
+        6,
+        6
+      ]
+    },
+    {
+      "start": 64.0,
+      "end": 72.0,
+      "text": "Is there any proof that a simpler form performs better?",
+      "word_idx": [
+        7,
+        7
+      ]
+    },
+    {
+      "start": 73.5,
+      "end": 81.0,
+      "text": "Here is where most teams get it wrong despite all of the data.",
+      "word_idx": [
+        8,
+        8
+      ]
+    },
+    {
+      "start": 82.0,
+      "end": 90.0,
+      "text": "The biggest gap is that you hide the value behind the gate.",
+      "word_idx": [
+        9,
+        9
+      ]
+    },
+    {
+      "start": 91.5,
+      "end": 99.0,
+      "text": "Instead, lead with the outcome, not with the signup wall.",
+      "word_idx": [
+        10,
+        10
+      ]
+    },
+    {
+      "start": 100.0,
+      "end": 108.0,
+      "text": "How do you measure whether the first impression really sticks?",
+      "word_idx": [
+        11,
+        11
+      ]
+    },
+    {
+      "start": 109.5,
+      "end": 117.0,
+      "text": "We tracked 3,200 sessions across 6 products for a full quarter.",
+      "word_idx": [
+        12,
+        12
+      ]
+    },
+    {
+      "start": 118.0,
+      "end": 126.0,
+      "text": "The result was not subtle at all, and I will show you exactly why.",
+      "word_idx": [
+        13,
+        13
+      ]
+    },
+    {
+      "start": 127.5,
+      "end": 135.0,
+      "text": "Most people think the problem is the copy, but it really is not.",
+      "word_idx": [
+        14,
+        14
+      ]
+    },
+    {
+      "start": 136.0,
+      "end": 144.0,
+      "text": "Can you imagine losing half of your traffic to a single field?",
+      "word_idx": [
+        15,
+        15
+      ]
+    },
+    {
+      "start": 145.5,
+      "end": 153.0,
+      "text": "The worst onboarding flow I have ever seen had nine required fields.",
+      "word_idx": [
+        16,
+        16
+      ]
+    },
+    {
+      "start": 154.0,
+      "end": 162.0,
+      "text": "Where do you draw the line between helpful and annoying?",
+      "word_idx": [
+        17,
+        17
+      ]
+    },
+    {
+      "start": 163.5,
+      "end": 171.0,
+      "text": "Actually, best practices have not changed that much in a decade.",
+      "word_idx": [
+        18,
+        18
+      ]
+    },
+    {
+      "start": 172.0,
+      "end": 180.0,
+      "text": "No one remembers a clever trick, but everyone remembers the outcome.",
+      "word_idx": [
+        19,
+        19
+      ]
+    },
+    {
+      "start": 181.5,
+      "end": 189.0,
+      "text": "The best products feel almost invisible until you are missing them.",
+      "word_idx": [
+        20,
+        20
+      ]
+    },
+    {
+      "start": 190.0,
+      "end": 198.0,
+      "text": "But most builders end up optimizing for the wrong metric entirely.",
+      "word_idx": [
+        21,
+        21
+      ]
+    },
+    {
+      "start": 199.5,
+      "end": 207.0,
+      "text": "How many of your visitors could name your core value in 5 words?",
+      "word_idx": [
+        22,
+        22
+      ]
+    },
+    {
+      "start": 208.0,
+      "end": 216.0,
+      "text": "When I cut the form to one field, signups doubled within a week.",
+      "word_idx": [
+        23,
+        23
+      ]
+    },
+    {
+      "start": 217.5,
+      "end": 225.0,
+      "text": "That single change beat the most expensive redesign we ever tried.",
+      "word_idx": [
+        24,
+        24
+      ]
+    },
+    {
+      "start": 226.0,
+      "end": 234.0,
+      "text": "Never make a stranger wait 3 taps for their very first win.",
+      "word_idx": [
+        25,
+        25
+      ]
+    },
+    {
+      "start": 235.5,
+      "end": 243.0,
+      "text": "Is this the biggest opportunity hiding inside your product right now?",
+      "word_idx": [
+        26,
+        26
+      ]
+    },
+    {
+      "start": 244.0,
+      "end": 252.0,
+      "text": "I could keep going, but you already have the numbers to test it.",
+      "word_idx": [
+        27,
+        27
+      ]
+    },
+    {
+      "start": 253.5,
+      "end": 261.0,
+      "text": "Instead of guessing, run one small experiment before the quarter ends.",
+      "word_idx": [
+        28,
+        28
+      ]
+    },
+    {
+      "start": 262.0,
+      "end": 271.0,
+      "text": "What would you change first if every user only got one chance?",
+      "word_idx": [
+        29,
+        29
+      ]
+    }
+  ]
+}

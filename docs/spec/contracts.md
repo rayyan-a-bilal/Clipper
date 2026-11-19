@@ -68,6 +68,14 @@ facecam
 }
 ```
 
+## CandidatesArtifact (M4a, candidates.json)
+```python
+{
+    "schema_version": 1,
+    "candidates": list[Candidate]  # pre-ranked via cheap_score (a PRE-RANK, NOT a quality verdict)
+}
+```
+
 ## ScoredClip
 ```python
 {
