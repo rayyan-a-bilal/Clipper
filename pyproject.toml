@@ -33,6 +33,8 @@ dependencies = [
     # requirement warning for this pair — that is expected.
     "scenedetect",
     "opencv-python-headless",
+    # M5a — Ollama HTTP client (no `ollama` python package)
+    "httpx",
     "pytest",
     "ruff",
 ]
@@ -76,6 +78,8 @@ select = [
 [tool.ruff.lint.per-file-ignores]
 # Manual runner scripts legitimately print to the console
 "scripts/*.py" = ["T201"]
+# prompts.py holds verbatim LLM prompt text (mirrored in docs/spec/scoring_prompt.md)
+"src/clipper/prompts.py" = ["E501"]
 
 [tool.pytest.ini_options]
 markers = [

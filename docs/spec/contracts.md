@@ -91,6 +91,42 @@ facecam
 }
 ```
 
+## CandidateContext (M5a)
+```python
+{
+    "cand_id": str,
+    "start": float,
+    "end": float,
+    "transcript": str,
+    "context_before": str = "",   # ~10s before window (cfg.llm.context_before_s)
+    "context_after": str = ""     # ~10s after window  (cfg.llm.context_after_s)
+}
+```
+
+## ScoringBatch (M5a, request payload)
+```python
+{
+    "schema_version": 1,
+    "candidates": list[CandidateContext]  # up to 5 per batch (cfg.llm.batch_size)
+}
+```
+
+## ScoringResponse (M5a, exact model output)
+```python
+{
+    "scores": list[ScoredClip]  # one per candidate in the batch, same order
+}
+```
+
+## ScoresArtifact (M5a, scores.json)
+```python
+{
+    "schema_version": 1,
+    "model": str,
+    "scores": list[ScoredClip]
+}
+```
+
 ## ClipPlan
 ```python
 {

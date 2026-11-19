@@ -31,11 +31,17 @@ This document outlines the complete video clipping pipeline for producing high-q
    - Cheap heuristic score
    - Keep top 20
 
-6. **LLM scoring**:
-   - Rubric axes: hook/payoff/self_contained/emotion/clarity (0-10 each)  
-   - JSON-schema constrained
-   - Batches of 5
-   - Retry twice
+6. **LLM scoring (M5 — managed runtime, see `spec/llm.md` + `spec/m5.md`)**:
+   - M5 manages an ephemeral `ollama serve` on 127.0.0.1:11435 with
+     `CUDA_VISIBLE_DEVICES=1` (GPU1, first P100); the user's main Ollama on
+     11434 is never touched; the child dies after the stage run
+   - Model: gemma4:12b (reused from the existing model store, never re-downloaded)
+   - Batch of up to 5 candidates (`scoring_prompt.md` rubric), HTTP via
+     httpx, JSON-schema constrained (`format=schema` with `format="json"`
+     + pydantic fallback, both recorded in `spec/llm.md`)
+   - Retry up to `max_retries` (2); a failed batch REJECTS those candidates
+     (never crashes the job)
+   - Constants: `spec/m5.md` (single source of truth for M5b/M5c)
 
 7. **selection/quality gate**:
    - Weighted score = 0.30*hook + 0.25*payoff + 0.20*self_contained + 0.15*emotion + 0.10*clarity

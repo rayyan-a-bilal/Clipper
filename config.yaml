@@ -6,8 +6,31 @@ devices:
   ffprobe: null
   nvidia_smi: null
 
+# M5a — managed ephemeral Ollama runtime (docs/spec/llm.md, docs/spec/m5.md).
+# The user's existing Ollama on 127.0.0.1:11434 is NEVER touched; M5 manages
+# its own `ollama serve` on runtime_port with CUDA_VISIBLE_DEVICES=gpu_index.
+# Legacy keys (endpoint/api_key/timeout) are kept for backward compatibility.
 llm:
-  endpoint: http://127.0.0.1:8081/v1
+  provider: "ollama"
+  manage_runtime: true
+  base_url: "http://127.0.0.1:11435"
+  runtime_port: 11435
+  gpu_index: 1
+  model: "gemma4:12b"
+  models_dir: null          # null -> $OLLAMA_MODELS -> ~/.ollama/models
+  num_ctx: 16384            # PER REQUEST, not cumulative
+  num_batch: 256
+  temperature: 0.1
+  num_predict: 1024
+  timeout_s: 300
+  startup_timeout_s: 60
+  max_retries: 2
+  batch_size: 5
+  max_batch_tokens: 6000
+  context_before_s: 10.0
+  context_after_s: 10.0
+  # legacy (pre-M5a), still honored if present:
+  endpoint: null
   api_key: null
   timeout: 300
 

@@ -130,3 +130,17 @@ The following components have been implemented:
 - M4b scope respected: no LLM scoring / selection / cut snapping (M5), no changes to M4a constants/formulas
 
 **Current status: M0, M1, M2, M3a, M3b, M4a, M4b complete. M3 fully done. M4 is "stage-done, scoring-pending" — candidate generation + stage wiring verified; M5 (LLM scoring) is next.**
+M5a - Managed Ollama Runtime, LLM Client, MockLLM, Contracts, Prompts (Complete)
+The following components have been implemented:
+- `docs/spec/llm.md` + `docs/spec/m5.md` — fixed the M5 runtime design (main Ollama on 11434 is NEVER touched; ephemeral child on 127.0.0.1:11435 pinned to GPU1 via CUDA_VISIBLE_DEVICES=1 at spawn; child dies with the stage run; num_ctx per-request) and ALL M5 constants (axes 0-10, weighted formula, gate 7.2/hook>=6/self_contained>=7, selection 3/5, dedupe IoU>0.30, cut constants + order, batch-failure => reject not crash, zero clips is valid, DRAFT ClipPlans center_crop/pending_qc, clip_id format)
+- `config.yaml` + `LLMConfig`: full new `llm:` block (backward compatible; legacy endpoint/api_key/timeout still load)
+- `src/clipper/llm_runtime.py`: `managed_ollama(cfg)` — spawn/ready/model/warm-up/GPU-verify, clean `LLMError` on port-occupied/wrong-GPU/low-VRAM/missing-model/missing-nvidia-smi, and guaranteed process-group teardown (SIGTERM->SIGKILL->port release) on success AND failure
+- `src/clipper/adapters/llm.py`: `LLMClient` protocol, `OllamaLLMClient` (httpx only; strict schema `format` with documented `format="json"` fallback; retry-then-`LLMError`; no model/endpoint fallback), `get_llm_client` (tests monkeypatch), `MockLLM` (canned queue, records calls, zero I/O)
+- New contracts (additive, schema_version=1): `CandidateContext`, `ScoringBatch`, `ScoringResponse`, `ScoresArtifact` (+ `docs/spec/contracts.md` sync)
+- `src/clipper/prompts.py::SCORING_SYSTEM` (single source of truth) mirrored into `docs/spec/scoring_prompt.md`
+- `scripts/llm_preflight.py` (managed runtime + tiny generate_json sanity + GPU/VRAM print, exit 0/1, always cleaned up)
+- Dependency added: httpx only (no `ollama` package); all tests CPU-only (httpx/subprocess/nvidia-smi mocked)
+- Acceptance: `.venv/bin/python -m pytest -m "not gpu" -v` -> 145 passed; `.venv/bin/python -m ruff check .` -> All checks passed
+- M5a scope respected: NO scoring (M5b), NO selection/cut snapping (M5c), M6/M7 GPU spec untouched
+
+**Current status: M0, M1, M2, M3a, M3b, M4a, M4b, M5a complete. M5a delivered the managed Ollama runtime + client + contracts + prompt; M5b (scoring stage + selection) is next. PI agent must be stopped before real M5 runs (see docs/spec/llm.md).**
