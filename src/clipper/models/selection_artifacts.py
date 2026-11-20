@@ -45,6 +45,11 @@ class ClipDecision(BaseModel):
       IoU (> 0.30) suppressed this one, if any.
     - ``cut_reject_reason``: specific :class:`clipper.cuts.CutError` reason
       when the suggestion could not be refined into a valid cut (M5c).
+    - ``refined_start`` / ``refined_end``: the final ``(start, end)`` cut
+      computed by ``clipper.cuts.refine_cut`` for SELECTED candidates only
+      (``None`` otherwise). Persisted so the later ``clip_plans`` stage
+      (M5C-5) can reuse the exact refined cut without re-running the
+      refinement (M5C-4, additive; absent in older ``selection.json``).
     """
 
     cand_id: str
@@ -54,6 +59,8 @@ class ClipDecision(BaseModel):
     suppressed_by: str | None = None
     selected: bool = False
     cut_reject_reason: str | None = None
+    refined_start: float | None = None
+    refined_end: float | None = None
 
 
 class SelectionArtifact(BaseModel):
