@@ -1,0 +1,155 @@
+---
+name: clipper-project
+description: Project knowledge and operating rules for the clipper clipping pipeline at /home/rbilal/clipper. Use for any clipper task, milestone M0-M10, spec/docs work, stage scripts, or debugging this project.
+---
+
+# Clipper project skill
+
+## When to use
+Any task involving:
+- the clipper repo (`/home/rbilal/clipper`)
+- milestones M0–M10 or their sub-stages (e.g. M5a/M5b/M5C-0…M5C-2)
+- docs/spec files, contracts, prompts
+- transcription, analysis, candidates, LLM scoring, selection, cuts, metadata/ClipPlans, face/layout, render, QC, posting
+- debugging tests or `scripts/*_job.py` stage runners
+
+## Project paths — do not invent paths
+The project root is **`/home/rbilal/clipper`**. (It is NOT `/home/clipper` — that path does not exist.)
+
+- Project root: `/home/rbilal/clipper`
+- Docs root: `/home/rbilal/clipper/docs`
+- Milestone/spec docs: `/home/rbilal/clipper/docs/spec/*.md` (milestones.md, m2.md, m3.md, m4.md, m5.md, llm.md, contracts.md, scoring_prompt.md, m5c_status.md)
+- Source: `/home/rbilal/clipper/src/clipper` (contracts in `models/`, I/O in `adapters/`, stages in `stages/`)
+- Stage runners: `/home/rbilal/clipper/scripts/` (analyze_job.py, candidates_job.py, transcribe_job.py, score_job.py, select_job.py, llm_preflight.py)
+- Tests: `/home/rbilal/clipper/tests`
+- DB: `data/clipper.db` (SQLite WAL); job artifacts under `data/jobs/<job_id>/`
+- Venv: `/home/rbilal/clipper/.venv`
+- Rules + progress (authoritative for "what is done now"): `/home/rbilal/clipper/AGENTS.md`
+
+`config.py` uses a `CLIPPER_` env prefix and reads `.env`; `paths.data_dir` is a **CWD-relative** `./data`. Always `cd /home/rbilal/clipper` before running anything. Never use `~/clipper` (wrong).
+
+## Startup ritual — every task
+1. `cd /home/rbilal/clipper`
+2. Read `AGENTS.md` — rules + current progress (last "Current status:" line wins)
+3. Read `docs/spec/milestones.md` for history; read the spec for the milestone in the task card (e.g. `docs/spec/m5.md`, `docs/spec/llm.md`); for M5c also `docs/spec/m5c_status.md`
+4. Read only the files listed in the task card. Do not load the whole repo into context.
+5. Activate the venv and verify:
+   ```bash
+   source .venv/bin/activate
+   which python
+   python -c "import sys; print(sys.executable); assert sys.prefix != sys.base_prefix"
+   ```
+6. `git status --short`
+7. Create the branch named in the task card (convention: `<milestone>-<slug>`, e.g. `m5c2-selection-stage-tests`)
+8. If venv activation fails: write `BLOCKED.md` and stop. Never use system python.
+
+## Current state snapshot (verify against AGENTS.md before acting)
+- Complete and verified: M0, M1, M2a/M2b, M3a/M3b, M4a/M4b, M5a, M5b, M5C-0 (audit), M5C-1 (selection pure + gate config). Full M5c code (selection/cuts/stages/runner) is committed on `main` (`be5205d`).
+- Suite: 225 CPU tests, `pytest -m "not gpu"`, ruff clean. Reference end-to-end job: `72e7bb26e760466ea2ca31cc0d1ac021` (80.8s AV1/opus test video; test media also at `test_media/source.mp4`).
+- **Next work per docs: M5C-2 — stage-level tests in `tests/test_selection_stage.py`** (backfill-after-CutError, zero-clip success with zero LLM calls asserted via MockLLM, metadata retry/fallback, metadata validation rejections, stage skip-idempotency, `clips` table upsert shape), then commit. See `docs/spec/m5c_status.md` for the exact test list and the two open judgment notes.
+- After M5c is closed: M6 (faces/layout), M7 (render), M8 (worker), M9 (QC UI), M10 (outbox) per the forward plan.
+- `clipper` CLI (`src/clipper/cli.py`) has `doctor`, `ingest`, `run`, `status`, `ls`, `approve`, `reject`, `rerender` — several are still stubs; stage runners are the `scripts/*_job.py` scripts.
+
+## Milestone map (forward plan)
+- M0–M4: scaffold/ingest/transcribe/analyze/candidates — DONE (see docs)
+- M5: LLM scoring — M5a runtime/client/contracts, M5b scoring stage, M5C-0/1 selection+cuts pure, **M5C-2 stage tests = remaining**
+- M6: GPU face analysis, layout decision, crop path (fills `layout`/`crop_path` in draft ClipPlans)
+- M7: GPU render (NVDEC/NVENC), captions, hook overlay
+- M8: worker orchestration (one job at a time in v1)
+- M9: QC web UI (FastAPI/Jinja2/HTMX per config/docs)
+- M10: posting outbox
+
+**Stale-map warning:** the old "Future Milestones" block in `AGENTS.md` (M6=quality gate, M7=cut refinement, M8=reframe, M9=captions, M10=QC+outbox) is a SUPERSEDED plan — selection/cut refinement was absorbed into M5c. `docs/spec/milestones.md` mixes old and new entries; trust the forward plan above + `docs/spec/m5.md` ("M6 replaces layout/crop_path") + the task card over any conflicting list. `config.yaml` already has forward `faces:`, `captions:`, `render:` blocks (1080x1920, crf 14, `h264_nvenc`).
+
+## Hardware
+- GPU0: RTX 2080 Super — media only (Whisper ASR, NVDEC/NVENC, M6/M7 video work)
+- GPU1: Tesla P100-16GB — M5 runtime LLM (`gemma4:12b`)
+- GPU2: Tesla P100-16GB — idle; may be used by the coding agent
+- CPU: i5-9600KF 6c/6t, 32GB RAM
+- P100s have no NVENC/NVDEC. Never assign video encode/decode to them.
+- GPUs are often occupied by the user's Ollama (Qwen 3.8:27B). **The PI/coding agent must be stopped before real (non-mock) LLM or GPU-ASR runs** — it competes for VRAM. All in-skill work must be mock/CPU.
+
+## Ollama topology — do not modify the user's service
+- Coding agent LLM: Qwen 3.8:27B on the user's existing Ollama `127.0.0.1:11434`, multi-GPU. NEVER change that service, its env, or systemd config (`deploy/*.service` files are reference only — no systemd changes).
+- M5 runtime: clipper spawns its own **ephemeral** `ollama serve` on `127.0.0.1:11435` with `CUDA_VISIBLE_DEVICES=1`, reusing the existing model store; `managed_ollama(cfg)` always tears it down (process group, SIGTERM→SIGKILL→port release) on success AND failure. Never restart per clip; `num_ctx` is per request.
+- M5 model/options: `gemma4:12b`, `num_ctx=16384`, `num_batch=256`, `temperature=0.1`, `num_predict=1024`, `timeout_s=300`, `batch_size=5`, `max_batch_tokens=6000`, context ±10s.
+- Tests use MockLLM / monkeypatched factories (`get_llm_client`, `get_adapter`, `get_scene_adapter`) — no network, no GPU, no nvidia-smi.
+
+## Environment gotchas (learned the hard way — do not regress)
+- ASR currently defaults to `device="cpu"`, `compute_type="int8"` (faster-whisper/ctranslate2 4.9; `cpu_threads` must be passed, `device_index` must be a real int on CPU). GPU0 cuda:0/float16 only when GPU0 is free.
+- scenedetect must be installed `pip install scenedetect --no-deps`; cv2 comes from `opencv-python-headless`. **`opencv-python` (non-headless) is FORBIDDEN** (libGL.so.1 failure). `pip check` false-positive for this pair is expected.
+- `adapters/scenes.py` does lazy `scenedetect`/`cv2` imports inside `detect_shots()` so imports stay light.
+- `data.json`/artifacts are written in canonical form `model_dump_json(indent=2)` + newline; golden fixtures (`tests/fixtures/m4/candidates.json`) must stay byte-identical.
+
+## Acceptance commands — always in venv
+```bash
+cd /home/rbilal/clipper
+source .venv/bin/activate
+which python
+python -c "import sys; print(sys.executable); assert sys.prefix != sys.base_prefix"
+python -m pytest -m "not gpu" -v
+python -m ruff check .
+```
+Paste the outputs as proof. Do not claim done without them.
+
+## Architecture invariants — non-negotiable
+- All data contracts live ONLY in `src/clipper/models/`, all with `schema_version=1`; re-exported from `clipper.models`.
+- Every stage: typed input → JSON artifact in `data/jobs/<job_id>/` → typed output. Skip only if DB stage `done` AND artifact exists AND `schema_version == 1`. Job goes `queued→running→queued` on success; failure marks stage+job `failed` and raises clean `StageError` (naming the missing artifact AND the milestone/script that produces it).
+- All GPU/ffmpeg/network/model I/O goes through `adapters/`. Pure logic in top-level modules (`candidates.py`, `scoring.py`, `selection.py`, `cuts.py`, `sentences.py`, `audio_analysis.py`) — no I/O, unit-testable without GPU/LLM.
+- Every adapter has a CPU-only Fixture/Mock. Tests never require GPU, CUDA, live Ollama, model downloads, or root.
+- SQLite WAL, stdlib sqlite3, no ORM. One job at a time in v1.
+- `Zero clips/candidates is a valid success` at every stage.
+- No new dependencies without explicit approval. No sudo, no systemd changes, no model downloads in tests.
+- Do not delete user work or revert commits without asking.
+
+## M5 rules (implemented — do not drift)
+- LLM proposes, code decides. Axes 0–10: hook, payoff, self_contained, emotion, clarity.
+- `weighted = 0.30*hook + 0.25*payoff + 0.20*self_contained + 0.15*emotion + 0.10*clarity` (single source: `scoring.weighted_score`)
+- Gate (from `cfg.clips.gate.*`): weighted ≥ 7.2, hook ≥ 6, self_contained ≥ 7.
+- Target 3, max 5 (`cfg.clips.target_count`/`max_count`). Dedupe temporal IoU > 0.30; backfill from next eligible.
+- Cut order (module constants in `cuts.py`): clamp suggested ±8s (`SUGGEST_SLACK`) → sentence snap (1.0) → word padding (−0.120/+0.250) → silence snap (≤0.300) → shot snap (≤0.400) → validate 15–75s LAST; `CutError` carries a specific reason.
+- Selection and cuts are pure Python and NEVER call the LLM.
+- Metadata is one optional LLM call per batch of selected clips (selected-clip transcripts only, never the full video). Retry then deterministic fallback + warning — metadata failure must NEVER fail the job.
+- Batch failure after `cfg.llm.max_retries` rejects those candidates (`reject_reason`), job continues.
+- M5 writes DRAFT ClipPlans: `layout=center_crop`, `crop_path=[]`, `status=pending_qc`; `clip_id = f"{job_id}-clip{n:02d}"`. M6 fills layout/crop_path.
+- Scoring prompt is `prompts.py::SCORING_SYSTEM` (canonical) mirrored verbatim in `docs/spec/scoring_prompt.md` — change both together only per spec decision.
+- `scripts/score_job.py --mock` / `select_job.py --mock` are deterministic wiring tests only — never a real judgement.
+
+## M6/M7 rules (forward, per docs/config)
+- Production path uses GPU0 (2080 Super) for all video decode/encode; NVDEC decode, NVENC encode (mezzanine + final), GPU crop/scale/composite where supported. No libx264 production path; CPU fallback only behind an explicit debug flag.
+- Face detection via onnxruntime-gpu (YuNet/SCRFD-class) at 30fps minimum (native if lower). 3fps crop paths are forbidden. Use a 30fps vision proxy or source, not the M1 15fps proxy. `crop_path` at native video fps.
+- Must include benchmark proof: decode fps, inference fps, render fps, GPU utilization, NVENC session in nvidia-smi, render time per clip.
+
+## No-drift rules
+- Follow the task card exactly; do not implement the next milestone; do not change constants, contracts, prompts, or config defaults of complete milestones.
+- If a spec is ambiguous: choose the simplest boring option, document it in the milestone spec, note it in the report/AGENTS.md. (Examples of open judgment notes live in `docs/spec/m5c_status.md` — do not "fix" them without a spec decision.)
+- If blocked after 3 attempts: write `BLOCKED.md` (what you tried, evidence) and stop.
+- If a harness/PI generation timeout threatens: split the task into smaller chunks (the M5c pattern: audit → selection pure → cuts pure → metadata → stages → tests) instead of retrying one giant prompt.
+
+## Task card template (expect incoming tasks in this shape)
+```
+Task: <milestone> — <scope>.
+Continue "clipper". <previous milestone> is complete.
+Read first: AGENTS.md, docs/spec/<relevant>.md, <listed files>.
+Create branch <branch>.
+Do NOT implement <next milestone>.
+VENV — MANDATORY:
+  source .venv/bin/activate
+  which python
+  python -c "import sys; print(sys.executable); assert sys.prefix != sys.base_prefix"
+Dependencies: <allowed / none>.
+BUILD: <numbered steps>.
+TESTS: <CPU-only list>.
+ACCEPTANCE:
+  source .venv/bin/activate
+  python -m pytest -m "not gpu" -v
+  python -m ruff check .
+Update AGENTS.md progress. Paste outputs. STOP after <milestone>.
+```
+
+## Definition of done
+- Acceptance commands pass in the venv (test count + ruff pasted as proof)
+- New/changed constants recorded in the milestone spec; contracts mirrored in `docs/spec/contracts.md` where applicable
+- `AGENTS.md` progress updated + `docs/spec/milestones.md` status line updated
+- Scope respected (no next-milestone work); work committed on the task's branch
+- Zero GPU/network requirements in any new test

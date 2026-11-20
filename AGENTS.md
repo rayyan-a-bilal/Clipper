@@ -1,5 +1,7 @@
 # Clipper Project Rules
 
+> Coding agents: a project skill with full operating rules (paths, venv ritual, milestone map, M5 rules, acceptance commands) lives in this repo at `.agents/skills/clipper-project/SKILL.md` — load/use it for any clipper task. This project's root is `/home/rbilal/clipper`.
+
 ## Development Environment
 - Python 3.11
 - pydantic v2
