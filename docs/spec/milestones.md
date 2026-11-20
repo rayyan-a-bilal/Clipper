@@ -222,3 +222,22 @@ Next: M4b (candidates pipeline stage + run script) per instructions; M5 (LLM sco
 - Tests (47 new, all CPU-only — MockLLM + temp DB + synthetic artifacts, NO Ollama/GPU/nvidia-smi): `tests/test_scoring.py` (25: build_context transcript slice + before/after windows + video start/end edges + cfg window sizes; estimate_tokens; pack_batches budget/size/order/oversized-truncates-context/not-transcript/whole-budget-exceeded; validate_scores missing/extra/duplicate/axis-range/bool/float-axes/OOB-keeps-scores/edge-in-bounds/model-reject-preserved) and `tests/test_scoring_stage.py` (22: artifact + stage row + `candidates.score_json` updates; skip on second run; OOB policy in stage; zero-candidate success (no LLM calls); batch failure rejects only that batch (job succeeds, score_json reflects it); retry-then-success; all batches fail -> artifact written, job queued, zero usable scores; semantic-validation failures are retryable; missing candidates/sentences/probe fail with the right milestone hint; schema_version mismatch; missing job; retry-after-failure; byte-identical `scores.json` across two fresh runs with the same mock; script success/missing-job/failure exit codes + mock position-derivation)
 - Acceptance: `source .venv/bin/activate` -> venv python verified; `python -m pytest -m "not gpu" -v` -> 192 passed (145 prior + 47 new); `python -m ruff check .` -> All checks passed; `python scripts/score_job.py 72e7bb26e760466ea2ca31cc0d1ac021 --mock` -> exit 0 (1 batch, 4 scored, 0 rejected; re-run skips the completed stage)
 - M5b scope respected: NO selection/cut refinement/metadata (M5c), M5a runtime/client/contracts/constants/prompts/config defaults untouched, no new dependencies
+
+## M5C-1 — Selection pure logic + contracts (Complete)
+- Branch `m5c1-selection-pure`; selection pure logic + contracts ONLY (no cuts, no metadata, no stage changes)
+- Contracts `src/clipper/models/selection_artifacts.py` (schema_version=1): `ClipDecision`, `SelectionArtifact`
+- `src/clipper/selection.py` (PURE): `weighted_score` (delegates to `scoring.weighted_score`), `passes_gate` from `cfg.clips.gate.*` (7.2/6/7), `temporal_iou` re-export, `select_clips` (eligible -> rank weighted/cheap/start -> IoU > 0.30 suppress -> target 3 / max 5 -> decision record for EVERY candidate)
+- `config.py`: `ClipGateConfig` + `ClipsConfig.gate` (backward compatible)
+- Tests: `tests/test_selection.py` (20 passed); suite 225 passed; ruff clean
+
+## M5C-2 — Cut refinement pure logic (Complete)
+- Branch `m5c2-cuts-pure`; scope: `src/clipper/cuts.py` PURE logic only — NO stage, NO metadata, NO LLM, NO file I/O
+- Implementation verified against `docs/spec/m5.md` (already present from M5c WIP, committed on main as `be5205d`; no logic changes needed):
+  - constants verbatim: `SUGGEST_SLACK=8.0`, `SENTENCE_SNAP=1.0`, `PAD_START=0.120`, `PAD_END=0.250`, `SILENCE_SNAP=0.300`, `SHOT_SNAP=0.400`
+  - `refine_cut(candidate, score, sentences, words, silence_regions, shots, duration_s) -> (start, end)` in the STRICT spec order: clamp to `[cand.start-8, cand.end+8] ∩ [0,duration]` -> sentence snap (nearest within 1.0s; documented fallback for beyond-1.0s per `docs/spec/m5c_status.md` judgment note) -> word padding (`first word .start - 0.120` / `last word .end + 0.250`) -> clamp `[0,duration]` -> silence snap (<= 0.300) -> shot snap (<= 0.400) -> validate `start < end`, `15.0 <= dur <= 75.0`, >= 1 full sentence; `CutError` carries a specific reason
+- Tests `tests/test_cuts.py` (16 CPU-only golden cases): constants mirror; sentence snap + exact word padding; silence snap within 0.300; shot snap within 0.400 + beyond-tolerance ignored; clamping to candidate ±8 and video bounds ([0, duration]); mid-gap suggestion; too-short/too-long/inverted/no-sentence rejections with specific reasons; no silence/shots still works (new); determinism (new)
+- Acceptance: venv verified; `python -m pytest -m "not gpu" -k "cuts" -v` -> 16 passed; `python -m pytest -m "not gpu" -v` -> 227 passed; `python -m ruff check .` -> All checks passed
+- M5C-2 scope respected: NO selection stage, NO clip_plans stage, NO metadata, NO script; no new dependencies; M6 not started
+
+## Current Status (updated for M5C-2)
+M0, M1, M2, M3a, M3b, M4a, M4b, M5a, M5b, M5C-0 (audit), M5C-1 (selection pure + gate config), M5C-2 (cuts pure + tests) complete. 227 CPU tests green (`pytest -m "not gpu"`), ruff clean. Next: M5C stage-level tests (per `docs/spec/m5c_status.md`), then the rest of M5c per the milestone docs.

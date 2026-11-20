@@ -213,6 +213,35 @@ def test_no_sentences_rejected():
     assert "no sentences" in str(exc.value)
 
 
+def test_no_silence_no_shots_still_works():
+    """empty silence_regions AND empty shots: refinement still succeeds and
+    the word-padded values survive un-snapped."""
+    sentences, words = _make_corpus(30)
+    start, end = refine_cut(
+        _cand(5.0, 30.0), _score(5.9, 29.0),
+        sentences, words, [], [], 60.0,
+    )
+    assert start == pytest.approx(6.25 - PAD_START)
+    assert end == pytest.approx(29.5 + PAD_END)
+
+
+def test_deterministic():
+    """same inputs -> byte-identical (start, end) across repeated calls."""
+    silence = [SilenceRegion(start=100.0, end=110.0)]  # far away: no snap
+    shots = [Shot(start=300.0, end=400.0)]  # far away: no snap
+    sentences, words = _make_corpus(30)
+    results = {
+        refine_cut(
+            _cand(5.0, 30.0), _score(5.9, 29.0),
+            sentences, words, silence, shots, 60.0,
+        )
+        for _ in range(5)
+    }
+    assert len(results) == 1
+    start, end = results.pop()
+    assert (start, end) == pytest.approx((6.25 - PAD_START, 29.5 + PAD_END))
+
+
 def test_result_bounds_and_full_sentence():
     """sanity invariants of a successful refine."""
     start, end = _refine(_cand(5.0, 30.0), _score(5.9, 29.0))
