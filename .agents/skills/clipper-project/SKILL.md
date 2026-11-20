@@ -30,8 +30,8 @@ The project root is **`/home/rbilal/clipper`**. (It is NOT `/home/clipper` — t
 
 ## Startup ritual — every task
 1. `cd /home/rbilal/clipper`
-2. Read `AGENTS.md` — rules + current progress (last "Current status:" line wins)
-3. Read `docs/spec/milestones.md` for history; read the spec for the milestone in the task card (e.g. `docs/spec/m5.md`, `docs/spec/llm.md`); for M5c also `docs/spec/m5c_status.md`
+2. Read `AGENTS.md` — rules + current progress (authoritative for what is done now)
+3. Read `docs/spec/milestones.md` for history; read the spec for the milestone in the task card (e.g. `docs/spec/m5.md`, `docs/spec/llm.md`)
 4. Read only the files listed in the task card. Do not load the whole repo into context.
 5. Activate the venv and verify:
    ```bash
@@ -43,23 +43,16 @@ The project root is **`/home/rbilal/clipper`**. (It is NOT `/home/clipper` — t
 7. Create the branch named in the task card (convention: `<milestone>-<slug>`, e.g. `m5c2-selection-stage-tests`)
 8. If venv activation fails: write `BLOCKED.md` and stop. Never use system python.
 
-## Current state snapshot (verify against AGENTS.md before acting)
-- Complete and verified: M0, M1, M2a/M2b, M3a/M3b, M4a/M4b, M5a, M5b, M5C-0 (audit), M5C-1 (selection pure + gate config). Full M5c code (selection/cuts/stages/runner) is committed on `main` (`be5205d`).
-- Suite: 225 CPU tests, `pytest -m "not gpu"`, ruff clean. Reference end-to-end job: `72e7bb26e760466ea2ca31cc0d1ac021` (80.8s AV1/opus test video; test media also at `test_media/source.mp4`).
-- **Next work per docs: M5C-2 — stage-level tests in `tests/test_selection_stage.py`** (backfill-after-CutError, zero-clip success with zero LLM calls asserted via MockLLM, metadata retry/fallback, metadata validation rejections, stage skip-idempotency, `clips` table upsert shape), then commit. See `docs/spec/m5c_status.md` for the exact test list and the two open judgment notes.
-- After M5c is closed: M6 (faces/layout), M7 (render), M8 (worker), M9 (QC UI), M10 (outbox) per the forward plan.
-- `clipper` CLI (`src/clipper/cli.py`) has `doctor`, `ingest`, `run`, `status`, `ls`, `approve`, `reject`, `rerender` — several are still stubs; stage runners are the `scripts/*_job.py` scripts.
-
-## Milestone map (forward plan)
-- M0–M4: scaffold/ingest/transcribe/analyze/candidates — DONE (see docs)
-- M5: LLM scoring — M5a runtime/client/contracts, M5b scoring stage, M5C-0/1 selection+cuts pure, **M5C-2 stage tests = remaining**
+## Milestone map
+- M0–M4: scaffold/ingest/transcribe/analyze/candidates
+- M5: LLM scoring — M5a runtime/client/contracts, M5b scoring stage, M5c selection+cuts+metadata
 - M6: GPU face analysis, layout decision, crop path (fills `layout`/`crop_path` in draft ClipPlans)
 - M7: GPU render (NVDEC/NVENC), captions, hook overlay
 - M8: worker orchestration (one job at a time in v1)
 - M9: QC web UI (FastAPI/Jinja2/HTMX per config/docs)
 - M10: posting outbox
 
-**Stale-map warning:** the old "Future Milestones" block in `AGENTS.md` (M6=quality gate, M7=cut refinement, M8=reframe, M9=captions, M10=QC+outbox) is a SUPERSEDED plan — selection/cut refinement was absorbed into M5c. `docs/spec/milestones.md` mixes old and new entries; trust the forward plan above + `docs/spec/m5.md` ("M6 replaces layout/crop_path") + the task card over any conflicting list. `config.yaml` already has forward `faces:`, `captions:`, `render:` blocks (1080x1920, crf 14, `h264_nvenc`).
+**Stale-map warning:** the old "Future Milestones" block in `AGENTS.md` (M6=quality gate, M7=cut refinement, M8=reframe, M9=captions, M10=QC+outbox) is a SUPERSEDED plan — selection/cut refinement was absorbed into M5c. `docs/spec/milestones.md` mixes old and new entries; trust the milestone specs + the task card over any conflicting list. `config.yaml` has forward `faces:`, `captions:`, `render:` blocks (1080x1920, crf 14, `h264_nvenc`).
 
 ## Hardware
 - GPU0: RTX 2080 Super — media only (Whisper ASR, NVDEC/NVENC, M6/M7 video work)
@@ -102,7 +95,7 @@ Paste the outputs as proof. Do not claim done without them.
 - No new dependencies without explicit approval. No sudo, no systemd changes, no model downloads in tests.
 - Do not delete user work or revert commits without asking.
 
-## M5 rules (implemented — do not drift)
+## M5 rules (do not drift)
 - LLM proposes, code decides. Axes 0–10: hook, payoff, self_contained, emotion, clarity.
 - `weighted = 0.30*hook + 0.25*payoff + 0.20*self_contained + 0.15*emotion + 0.10*clarity` (single source: `scoring.weighted_score`)
 - Gate (from `cfg.clips.gate.*`): weighted ≥ 7.2, hook ≥ 6, self_contained ≥ 7.
