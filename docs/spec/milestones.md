@@ -153,10 +153,11 @@ Next: M4b (candidates pipeline stage + run script) per instructions; M5 (LLM sco
 - Window filtering (M4a logic done)
 
 ## M5 - LLM scoring
-- LLM integration (OpenAI-compatible)
-- Batch processing 
-- Retry logic
-- Scoring result storage
+- LLM integration + managed Ollama runtime (M5a done)
+- Batch processing (M5b done)
+- Retry logic (M5b done)
+- Scoring result storage (M5b done)
+- Selection / cut refinement (M5c — not implemented yet)
 
 ## M6 - Quality gate & selection
 - Weighted scoring system
@@ -203,3 +204,21 @@ Next: M4b (candidates pipeline stage + run script) per instructions; M5 (LLM sco
 - Tests (32 new, all CPU-only): `tests/test_llm_config.py` (defaults + legacy configs), `tests/test_scoring_contracts.py` (round-trips + existing `Candidate` untouched), `tests/test_llm_client.py` (request body correctness, valid response validates, invalid JSON / invalid schema / HTTP 500 / timeout each retry 3x -> `LLMError`, retry-then-success, schema-rejected -> `format="json"` fallback recorded, MockLLM queue/exceptions/empty/records), `tests/test_llm_runtime.py` (spawn cmd/env/port/session + log path, process group killed on normal exit AND on exception, clean failures: port occupied / model missing / wrong GPU / insufficient VRAM / nvidia-smi missing / refuses 11434, `manage_runtime=false` bypass, preflight success+failure exit codes)
 - Acceptance: `.venv/bin/python -c "import sys; print(sys.executable); assert sys.prefix != sys.base_prefix"` OK; `.venv/bin/python -m pytest -m "not gpu" -v` -> 145 passed (113 prior + 32 new); `.venv/bin/python -m ruff check .` -> All checks passed
 - M5a scope respected: NO scoring stage, NO selection, NO cut snapping (M5b/M5c), NO `clips` writes, M6/M7 GPU spec untouched
+## M5b — Scoring Stage (Complete)
+- `src/clipper/scoring.py` (PURE, no I/O) — fixed M5b rules from `docs/spec/m5.md`:
+  - `build_context(candidate, sentences, cfg) -> CandidateContext`: transcript = sentences[sentence_range] (INCLUSIVE) joined by single spaces; `context_before` = sentences overlapping `[start - cfg.llm.context_before_s, start)`; `context_after` = sentences overlapping `(end, end + cfg.llm.context_after_s]`
+  - `estimate_tokens(text) = max(1, len(text)//4)`
+  - `pack_batches(contexts, batch_size, max_batch_tokens) -> list[ScoringBatch]`: greedy, order-preserving; 1500-token prompt-overhead reserve (`PROMPT_OVERHEAD_TOKENS`); per-candidate cost = est(transcript)+est(before)+est(after)+60 (`PER_CANDIDATE_OVERHEAD_TOKENS`); new batch at `batch_size` (5) OR when adding would exceed budget; >=1 candidate per batch; an oversized single candidate truncates context_before/context_after FIRST (before first, then after) — NEVER the transcript
+  - `validate_scores(response, batch) -> list[ScoredClip]`: exactly one score per cand_id (missing/extra/duplicate => `ValueError` => batch retry); axes must be `int` in 0..10 (violation => `ValueError`); `suggested_in/out` outside `[cand.start-8, cand.end+8]` (`SUGGEST_SLACK=8.0`) => scores KEPT, `reject_reason="suggestion_out_of_bounds"`; returns clips in batch candidate order
+  - `weighted_score(clip)`: 0.30*hook + 0.25*payoff + 0.20*self_contained + 0.15*emotion + 0.10*clarity (selection itself is M5c)
+- `src/clipper/stages/score.py`: `run_scoring(job_id, cfg, conn, client: LLMClient)`:
+  - requires `candidates.json` (M4b, `scripts/candidates_job.py`) + `sentences.json` (M2b, `scripts/transcribe_job.py`) + `probe.json` (M1 ingest) — clean `StageError` naming the missing artifact AND its producing milestone/script; `schema_version == 1` validated on all inputs
+  - stage name `scoring`; skip only when DB state=done AND `scores.json` exists AND schema valid
+  - job `queued -> running -> queued` on success; stage + job `failed` + clean `StageError` on error
+  - builds contexts for ALL candidates in artifact order; `client.generate_json(SCORING_SYSTEM, batch_json, ScoringResponse)` per batch with `validate_scores`; retries up to `cfg.llm.max_retries` on `LLMError`/semantic `ValueError` (incl. schema-validation failure); after retries: batch's candidates are REJECTED (all axes 0, `reject_reason="llm_batch_failed: <msg>"`) — the job NEVER fails for a batch
+  - writes `scores.json` as `ScoresArtifact(model=cfg.llm.model, scores=<ALL candidates in original order>)`; updates `candidates.score_json` per `cand_id` (M4b rows); zero candidates is a valid success (zero LLM calls)
+  - re-exports: `stages/__init__` now exposes `run_scoring`
+- `scripts/score_job.py <JOB_ID> [--mock]`: default = ONE managed ephemeral Ollama (`managed_ollama(cfg)`, docs/spec/llm.md) serving every batch then killed (success AND failure), `get_llm_client(cfg, base_url)` inside; `--mock` = `_MockScorer` deterministic wiring-test ONLY (position j in batch -> `10 - (2j)%11` on all axes, `suggested_in=cand.start`, `suggested_out=cand.end`; never a real judgement); prints job/model/batches/scored/rejected/top-5-by-weighted/artifact; exit 0 on success (incl. all-rejected), exit 1 clean error
+- Tests (47 new, all CPU-only — MockLLM + temp DB + synthetic artifacts, NO Ollama/GPU/nvidia-smi): `tests/test_scoring.py` (25: build_context transcript slice + before/after windows + video start/end edges + cfg window sizes; estimate_tokens; pack_batches budget/size/order/oversized-truncates-context/not-transcript/whole-budget-exceeded; validate_scores missing/extra/duplicate/axis-range/bool/float-axes/OOB-keeps-scores/edge-in-bounds/model-reject-preserved) and `tests/test_scoring_stage.py` (22: artifact + stage row + `candidates.score_json` updates; skip on second run; OOB policy in stage; zero-candidate success (no LLM calls); batch failure rejects only that batch (job succeeds, score_json reflects it); retry-then-success; all batches fail -> artifact written, job queued, zero usable scores; semantic-validation failures are retryable; missing candidates/sentences/probe fail with the right milestone hint; schema_version mismatch; missing job; retry-after-failure; byte-identical `scores.json` across two fresh runs with the same mock; script success/missing-job/failure exit codes + mock position-derivation)
+- Acceptance: `source .venv/bin/activate` -> venv python verified; `python -m pytest -m "not gpu" -v` -> 192 passed (145 prior + 47 new); `python -m ruff check .` -> All checks passed; `python scripts/score_job.py 72e7bb26e760466ea2ca31cc0d1ac021 --mock` -> exit 0 (1 batch, 4 scored, 0 rejected; re-run skips the completed stage)
+- M5b scope respected: NO selection/cut refinement/metadata (M5c), M5a runtime/client/contracts/constants/prompts/config defaults untouched, no new dependencies
