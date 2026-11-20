@@ -134,5 +134,10 @@ from .scoring_artifacts import CandidateContext as CandidateContext  # noqa: E40
 from .scoring_artifacts import ScoresArtifact as ScoresArtifact  # noqa: E402
 from .scoring_artifacts import ScoringBatch as ScoringBatch  # noqa: E402
 from .scoring_artifacts import ScoringResponse as ScoringResponse  # noqa: E402
+from .selection_artifacts import ClipDecision as ClipDecision  # noqa: E402
+from .selection_artifacts import ClipMetadata as ClipMetadata  # noqa: E402
+from .selection_artifacts import ClipPlansArtifact as ClipPlansArtifact  # noqa: E402
+from .selection_artifacts import MetadataResponse as MetadataResponse  # noqa: E402
+from .selection_artifacts import SelectionArtifact as SelectionArtifact  # noqa: E402
 from .transcript_artifacts import SentencesArtifact as SentencesArtifact  # noqa: E402
 from .transcript_artifacts import WordsArtifact as WordsArtifact  # noqa: E402

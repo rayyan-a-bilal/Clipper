@@ -5,7 +5,7 @@ Configuration management for clipper.
 import os
 from pathlib import Path
 
-from pydantic import Field, model_validator
+from pydantic import BaseModel, Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -87,6 +87,15 @@ class ASRConfig(BaseSettings):
     vad_filter: bool = True
     condition_on_previous_text: bool = False
 
+class ClipGateConfig(BaseModel):
+    """M5c quality-gate thresholds (defaults fixed by docs/spec/m5.md:
+    weighted >= 7.2 AND hook >= 6 AND self_contained >= 7)."""
+
+    weighted: float = 7.2
+    hook: int = 6
+    self_contained: int = 7
+
+
 class ClipsConfig(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="CLIPPER_")
 
@@ -99,6 +108,8 @@ class ClipsConfig(BaseSettings):
     # M4a — niche -> keywords; empty by default (niche score falls back to
     # neutral 0.5). Backward compatible: existing configs load unchanged.
     niche_keywords: dict[str, list[str]] = {}
+    # M5c — quality-gate thresholds (defaults fixed by docs/spec/m5.md).
+    gate: ClipGateConfig = Field(default_factory=ClipGateConfig)
 
 class FacesConfig(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="CLIPPER_")

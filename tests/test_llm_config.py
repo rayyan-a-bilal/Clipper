@@ -70,8 +70,12 @@ def test_legacy_dict_shape_loads(tmp_path):
 
 
 def test_selection_config_fields(tmp_path):
-    """M5b selection reads the M4 clips config fields."""
+    """M5b/M5c selection reads the clips config fields + gate thresholds."""
     cfg = _cfg(tmp_path)
     assert cfg.clips.target_count == 3
     assert cfg.clips.max_count == 5
     assert cfg.clips.overlap_threshold == 0.3
+    # M5c gate thresholds (defaults fixed by docs/spec/m5.md)
+    assert cfg.clips.gate.weighted == 7.2
+    assert cfg.clips.gate.hook == 6
+    assert cfg.clips.gate.self_contained == 7

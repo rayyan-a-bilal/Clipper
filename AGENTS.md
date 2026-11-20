@@ -154,3 +154,18 @@ The following components have been implemented:
 - M5b scope respected: NO selection / cut refinement / metadata (M5c); M5a constants, prompts, contracts and config defaults untouched; no new dependencies
 
 **Current status: M0, M1, M2, M3a, M3b, M4a, M4b, M5a, M5b complete. M5b delivered the scoring stage (pure scoring helpers, `scoring` stage, `scores.json`, `candidates.score_json`, batch-failure rejection policy, mock/managed-ollama runner script). M5c (selection + cut refinement) is next. PI agent must be stopped before real M5 runs (see docs/spec/llm.md).**
+
+M5C-0 — Audit (Complete)
+- Audit-only pass over the partial M5c WIP; no features added. Verdict: all M5c pieces existed on disk (uncommitted) — `selection.py`, `cuts.py`, `models/selection_artifacts.py`, `METADATA_SYSTEM`, `stages/select.py`, `scripts/select_job.py`, `tests/test_selection.py` + `tests/test_cuts.py`; 224/224 tests green; collection clean. No spec drift on gate weights/thresholds, cut constants/order, backfill, zero-clip path, or all-candidate decisions. Gaps: 19 ruff style errors (tests + one script line) and no stage-level tests. Status doc: `docs/spec/m5c_status.md`.
+
+M5C-1 — Selection pure logic + contracts (Complete)
+- Branch: `m5c1-selection-pure`. Scope: selection pure logic + contracts ONLY — no cuts, no metadata, no stage changes.
+- Contracts (`src/clipper/models/selection_artifacts.py`, schema_version=1, registered in `models/__init__`): `ClipDecision` (cand_id, weighted, eligible, gate_reasons, suppressed_by, selected, cut_reject_reason=None), `SelectionArtifact`
+- `src/clipper/selection.py` (PURE, no I/O, no LLM): `weighted_score` (0.30/0.25/0.20/0.15/0.10 via `scoring.weighted_score`), `passes_gate(score, cfg)` — thresholds now read from **`cfg.clips.gate.{weighted, hook, self_contained}`** (defaults 7.2/6/7 per docs/spec/m5.md; one reason per violated axis; int-0..10 axis validation), `temporal_iou` (M4 helper re-export), `select_clips` — eligible = reject_reason None AND axes valid AND gate pass; rank weighted DESC / cheap DESC / start ASC; greedy suppress IoU > 0.30; take `cfg.clips.target_count` (3) hard-capped at `cfg.clips.max_count` (5); decision record for EVERY candidate (selected or not)
+- `src/clipper/config.py`: new `ClipGateConfig` (weighted=7.2, hook=6, self_contained=7) + `ClipsConfig.gate` field (backward compatible: existing configs load unchanged)
+- Tests (CPU-only): existing 17 `test_selection.py` coverage (weighted math exact, per-axis gate boundaries, out-of-range axes, IoU values + re-export identity, suppression strictly >0.30, ranking tie-breaks, target/max caps, zero-eligible valid, all-candidate decision records, spec-constant mirror) + NEW `test_gate_thresholds_come_from_config` (each gate threshold independently driven by `cfg.clips.gate.*`) + gate defaults asserted in `test_llm_config.py::test_selection_config_fields`
+- Ruff cleanup of remaining M5c style errors (`tests/test_selection.py` E501/F841/C408/I001, `tests/test_cuts.py` I001/F401, `scripts/select_job.py` E501)
+- Acceptance: venv verified; `python -m pytest -m "not gpu" -k "selection" -v` -> 20 passed; `python -m pytest -m "not gpu" -v` -> **225 passed**; `python -m ruff check .` -> All checks passed
+- Scope respected: NO cuts, NO metadata, NO stage work touched beyond the gate-config read; no new dependencies; M6 not started
+
+**Current status: M0–M5b + M5C-0 (audit) + M5C-1 (selection pure logic & contracts) complete — 225 CPU tests green, ruff clean. Next: M5C-2 (stage: selection.json + cut refinement/backfill + clip_plans/metadata, per docs/spec/m5c_status.md). PI agent must be stopped before real LLM runs (docs/spec/llm.md).**

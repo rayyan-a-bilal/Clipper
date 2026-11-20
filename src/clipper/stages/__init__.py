@@ -12,6 +12,7 @@ from .analyze import run_analysis  # noqa: E402
 from .candidates import run_candidates  # noqa: E402
 from .ingest import compute_content_hash, run_ingest  # noqa: E402
 from .score import run_scoring  # noqa: E402
+from .select import run_selection  # noqa: E402
 
 __all__ = [
     "run_ingest",
@@ -20,4 +21,5 @@ __all__ = [
     "run_analysis",
     "run_candidates",
     "run_scoring",
+    "run_selection",
 ]

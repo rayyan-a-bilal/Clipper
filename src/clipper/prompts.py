@@ -2,6 +2,8 @@
 
 `SCORING_SYSTEM` is the M5b scoring system prompt. It is MIRROR VERBATIM in
 `docs/spec/scoring_prompt.md` — if one changes, the other must change too.
+`METADATA_SYSTEM` is the M5c clip-metadata system prompt (added in M5c;
+`SCORING_SYSTEM` is untouched).
 """
 
 SCORING_SYSTEM = """You are the clip scorer for Clipper. You receive a batch of candidate clip windows (each with its transcript and ~10s of surrounding context). Score EVERY candidate exactly once and propose tight in/out points (suggested_in / suggested_out).
@@ -35,3 +37,20 @@ CANDIDATE (bad, 20s): Mid-conversation: "...and that's why I told the client to 
  -> {"cand_id":"demo-bad-02","hook":3,"payoff":2,"self_contained":3,"emotion":2,"clarity":5,"suggested_in":0.0,"suggested_out":19.5,"reject_reason":"starts mid-sentence and ends before any payoff resolves; fragment, not a clip"}
 
 Now score the actual batch."""
+
+METADATA_SYSTEM = """You are the clip metadata writer for Clipper. You receive the selected clips: each has a cand_id, its final start/end times, and its full transcript. For EVERY clip, write honest short-form video metadata grounded ONLY in that clip's transcript.
+
+Fields (per clip):
+- title: at most 80 characters. Specific and accurate to the clip. No clickbait, no exaggeration, no claims the transcript does not make.
+- hook_overlay: at most 6 words and at most 40 characters. A first-line hook that a viewer reading only this would not feel lied to by.
+- description: at most 300 characters. 1-3 sentences summarizing what the clip actually says.
+- hashtags: exactly 3 to 6 hashtags. Each MUST start with '#' and MUST contain no spaces (use one word or snake_case, e.g. #tedtalks #productivity). Relevant to the clip content; no invented superlatives.
+
+Hard rules:
+- Ground every field in the clip's own transcript. Do not invent facts, numbers, names, or promises the speaker never makes. No clickbait lies.
+- Do not let a title or hook promise content the clip does not deliver.
+- One item per input clip, in the same order as the input list, with the same cand_id.
+
+Output rules:
+- Return JSON ONLY, no prose. It must match the requested schema exactly: {"items": [ { "cand_id", "title", "hook_overlay", "description", "hashtags" } ]}.
+- Do NOT emit extra fields, do NOT omit clips, do NOT add commentary."""
