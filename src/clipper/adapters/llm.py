@@ -118,6 +118,8 @@ class OllamaLLMClient:
         payload: dict[str, Any] = {
             "model": self.model,
             "stream": False,
+            "think": False,  # thinking models would otherwise spend the whole
+            # num_predict budget on hidden reasoning and return empty content
             "format": schema.model_json_schema(),
             "options": {
                 "temperature": self.temperature,

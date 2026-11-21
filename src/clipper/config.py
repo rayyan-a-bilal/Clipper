@@ -48,7 +48,7 @@ class LLMConfig(BaseSettings):
     num_ctx: int = 16384  # PER REQUEST, not cumulative (docs/spec/llm.md)
     num_batch: int = 256
     temperature: float = 0.1
-    num_predict: int = 1024
+    num_predict: int = 2048  # raised 1024->2048 (thinking model, docs/spec/llm.md)
     timeout_s: int = 300
     startup_timeout_s: int = 60
     max_retries: int = 2

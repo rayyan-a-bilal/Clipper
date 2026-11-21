@@ -20,7 +20,7 @@ def test_new_llm_defaults(tmp_path):
     assert llm.num_ctx == 16384
     assert llm.num_batch == 256
     assert llm.temperature == 0.1
-    assert llm.num_predict == 1024
+    assert llm.num_predict == 2048
     assert llm.timeout_s == 300
     assert llm.startup_timeout_s == 60
     assert llm.max_retries == 2

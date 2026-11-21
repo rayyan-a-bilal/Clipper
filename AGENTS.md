@@ -225,3 +225,10 @@ M5C-5 — Clip Plans Stage (M5C-5)
 - Verified live: `compute_app_gpus()` -> `{'/usr/local/lib/ollama/llama-server': {0, 1, 2}}`, `_is_ollama_process(...)` true — previously a hard `IndexError`.
 - Accepted (venv): `python -m pytest -m "not gpu" -q` -> **303 passed**; `python -m ruff check .` -> All checks passed.
 - NOTE for the user: to actually PASS the real preflight, GPU1 needs >= 12000 MiB free — the user's 27B Ollama runner (`llama-server` pid 158861) is currently holding ~10.8 GiB on GPU1 (and GPU0/GPU2); stop the PI agent / `ollama stop` the model first.
+
+**M5a fix — `score_job` all-batch rejection: "model returned invalid JSON: ''" (thinking model)**
+- Symptom: real `score_job` run rejected every candidate with `llm_batch_failed: model returned invalid JSON: ''` — `message.content` arrived empty from `/api/chat` despite HTTP 200.
+- Root cause: `gemma4:12b` is a thinking model; without `think=false` it spends the entire `num_predict` budget (1024) on hidden reasoning, so no visible output remains.
+- Fix (on `main`): `OllamaLLMClient` now sends `think=false` in the `/api/chat` body; `cfg.llm.num_predict` raised 1024 -> 2048 (`config.py` default, `config.yaml`, doc comments in `stages/select.py`; `METADATA_NUM_PREDICT_CAP` stays 512); `docs/spec/llm.md` + `docs/spec/m5.md` updated; tests updated (`test_llm_client.py` asserts `think=false` + 2048, `test_llm_config.py`, `test_clip_plans_stage.py`).
+- Verified live by user: `llm_preflight` OK; `score_job` -> 20 scored, 3 rejected (genuine judgement reasons); `select_job` -> 2/20 selected, 2 DRAFT clips, rest gate failures with per-axis reasons — VALID success, no clips fabricated.
+- Accepted (venv): `python -m pytest -m "not gpu" -q` -> **303 passed**; `python -m ruff check .` -> All checks passed.

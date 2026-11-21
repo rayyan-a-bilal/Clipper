@@ -55,7 +55,7 @@ Selection + draft ClipPlan stages for the clipper pipeline (M5C-4 / M5C-5).
   ``fallback_metadata`` + a logged warning — metadata failure must NEVER
   fail the job (docs/spec/m5.md).
 - The client's ``num_predict`` is capped at ``METADATA_NUM_PREDICT_CAP``
-  (512) for the metadata call (cfg default is 1024).
+  (512) for the metadata call (cfg default is 2048).
 - Builds one DRAFT :class:`ClipPlan` per selected clip in RANK order:
   ``clip_id = f"{job_id}-clip{n:02d}"`` (n 1-based), start/end from the
   selection stage's refined cut, ``layout = Layout.center_crop``,
@@ -118,7 +118,7 @@ _ARTIFACT_NAME = "selection.json"
 _PLANS_STAGE_NAME = "clip_plans"
 _PLANS_ARTIFACT_NAME = "clip_plans.json"
 # The metadata call is short-form text: cap num_predict at 512 tokens
-# (cfg.llm.num_predict is 1024 for scoring) — M5C-5 card.
+# (cfg.llm.num_predict is 2048 for scoring) — M5C-5 card.
 METADATA_NUM_PREDICT_CAP = 512
 
 # (filename, expected artifact model, milestone hint for clean errors)
@@ -483,7 +483,7 @@ def _clip_transcript(sentences: list, start: float, end: float) -> str:
 
 def _cap_metadata_num_predict(client: LLMClient) -> None:
     """Cap the metadata request's ``num_predict`` at 512 (token cap for the
-    short-form metadata call; ``cfg.llm.num_predict`` is 1024). Clients
+    short-form metadata call; ``cfg.llm.num_predict`` is 2048). Clients
     without a settable ``num_predict`` (e.g. ``MockLLM``) are untouched."""
     current = getattr(client, "num_predict", None)
     if isinstance(current, int) and not isinstance(current, bool):

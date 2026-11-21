@@ -615,7 +615,7 @@ def test_ollama_client_passes_config_timeout_on_every_request(tmp_path):
 def test_metadata_num_predict_capped_at_512(tmp_path):
     assert METADATA_NUM_PREDICT_CAP == 512
     cfg = _setup(tmp_path, 3)
-    assert cfg.llm.num_predict == 1024  # config default unchanged
+    assert cfg.llm.num_predict == 2048  # config default unchanged
 
     _run_selection(cfg)
     decisions = _selected_decisions(cfg)

@@ -21,7 +21,7 @@ llm:
   num_ctx: 16384            # PER REQUEST, not cumulative
   num_batch: 256
   temperature: 0.1
-  num_predict: 1024
+  num_predict: 2048
   timeout_s: 300
   startup_timeout_s: 60
   max_retries: 2

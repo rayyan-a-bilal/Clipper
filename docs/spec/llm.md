@@ -56,8 +56,13 @@ and lives for the whole run. **Never restart the runtime per clip.**
 - `OllamaLLMClient` speaks plain HTTP (httpx only — no `ollama` python
   package) to `{base_url}/api/chat`.
 - Request: `model`, `messages=[system, user]`, `stream=false`,
-  `format = schema.model_json_schema()` (strict mode), and
+  `format = schema.model_json_schema()` (strict mode),
+  `think = false`, and
   `options = {temperature, num_ctx, num_batch, num_predict}`.
+  `think=false` is required: gemma4:12b is a thinking model and without it
+  spends the whole `num_predict` budget (2048) on hidden reasoning, so
+  `message.content` arrives empty and every batch fails with
+  `model returned invalid JSON: ''`.
 - **Schema-format fallback (recorded):** if the server rejects the schema
   format (HTTP 400/422/500 naming the format/schema), the client falls back
   to `format="json"` + pydantic validation of the parsed content. The mode

@@ -89,6 +89,9 @@ def test_request_body_and_valid_response(cfg):
     body = req["json"]
     assert body["model"] == "gemma4:12b"
     assert body["stream"] is False
+    # thinking models would otherwise exhaust num_predict on hidden reasoning
+    # and return empty content (see docs/spec/llm.md); disable thinking
+    assert body["think"] is False
     assert body["messages"] == [
         {"role": "system", "content": "system-prompt"},
         {"role": "user", "content": "user-prompt"},
@@ -99,7 +102,7 @@ def test_request_body_and_valid_response(cfg):
     assert opts["temperature"] == pytest.approx(0.1)
     assert opts["num_ctx"] == 16384
     assert opts["num_batch"] == 256
-    assert opts["num_predict"] == 1024
+    assert opts["num_predict"] == 2048
     assert client.last_mode == "schema"
 
 
