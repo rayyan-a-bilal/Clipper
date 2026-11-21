@@ -445,11 +445,17 @@ def test_stage_never_touches_llm_or_ollama(tmp_path, monkeypatch):
     monkeypatch.setattr(llm_mod, "OllamaLLMClient", boom)
     monkeypatch.setattr(llm_rt, "managed_ollama", boom)
 
-    # The stage module has no LLM surface at all, and the public call
-    # signature takes no client parameter.
-    assert not hasattr(sel, "LLMClient")
+    # The ``selection`` stage takes no client and its body has no LLM
+    # surface. (M5C-5: the module now ALSO hosts the ``clip_plans`` stage,
+    # which legitimately uses a client — the invariant is per-stage.)
     assert "client" not in inspect.signature(run_selection_stage).parameters
+    source = inspect.getsource(run_selection_stage)
+    assert "generate_json" not in source
+    assert "OllamaLLMClient" not in source
+    assert "managed_ollama" not in source
+    assert "run_clip_plans_stage" not in source
 
     cfg = _setup(tmp_path, 3)
     summary = _run(cfg)  # would raise AssertionError if LLM were touched
     assert summary["selected"] == 3
+    _ = sel  # module imported for namespace monkeypatching; stage is LLM-free

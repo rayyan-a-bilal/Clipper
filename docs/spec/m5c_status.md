@@ -1,5 +1,10 @@
 # M5C-0 — Audit Status (2026-11-20)
 
+> **UP TO DATE (M5C-5):** this document is the historical M5C-0 audit. M5c is
+> now fully complete (M5C-1 … M5C-5) — see `docs/spec/milestones.md`
+> ("M5C-5 — Clip Plans Stage (Complete)") and `AGENTS.md` for the final state.
+> The "Recommended next chunk" below was delivered in M5C-1…M5C-5.
+
 Audit-only pass (M5C-0). No new features implemented. M5b complete (commit
 `2751918`); all M5c work is present on disk but **uncommitted**
 (`git status`: modified `models/__init__.py`, `prompts.py`, `stages/__init__.py`;
