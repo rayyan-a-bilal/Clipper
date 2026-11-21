@@ -270,6 +270,61 @@ def test_manage_runtime_false_bypasses_spawning(cfg, monkeypatch):
 
 
 # ---------------------------------------------------------------------------
+# _resolve_models_dir: pick a store that actually contains the model
+# ---------------------------------------------------------------------------
+
+def _write_manifest(store: Path, model: str) -> None:
+    name, _, tag = model.partition(":")
+    p = store / "manifests" / "registry.ollama.ai" / "library" / name
+    p.mkdir(parents=True, exist_ok=True)
+    (p / (tag or "latest")).write_text("{}", encoding="utf-8")
+
+
+def test_resolve_keeps_configured_store_when_model_present(tmp_path, monkeypatch):
+    good = tmp_path / "good"
+    _write_manifest(good, "gemma4:12b")
+    monkeypatch.setattr(llm_runtime, "_SYSTEM_STORES", ())
+    monkeypatch.delenv("OLLAMA_MODELS", raising=False)
+    monkeypatch.setattr(llm_runtime.Path, "home", lambda: tmp_path / "nohome")
+    cfg = Config(llm=LLMConfig(models_dir=str(good), model="gemma4:12b"))
+    assert llm_runtime._resolve_models_dir(cfg) == str(good)
+
+
+def test_resolve_prefers_env_store_when_configured_empty(tmp_path, monkeypatch):
+    empty = tmp_path / "empty"
+    (empty / "manifests").mkdir(parents=True)
+    envstore = tmp_path / "envstore"
+    _write_manifest(envstore, "gemma4:12b")
+    monkeypatch.setattr(llm_runtime, "_SYSTEM_STORES", ())
+    monkeypatch.setenv("OLLAMA_MODELS", str(envstore))
+    monkeypatch.setattr(llm_runtime.Path, "home", lambda: tmp_path / "nohome")
+    cfg = Config(llm=LLMConfig(models_dir=str(empty), model="gemma4:12b"))
+    assert llm_runtime._resolve_models_dir(cfg) == str(envstore)
+
+
+def test_resolve_falls_back_to_system_store(tmp_path, monkeypatch):
+    empty = tmp_path / "empty"
+    (empty / "manifests").mkdir(parents=True)
+    sysstore = tmp_path / "sys" / "models"
+    _write_manifest(sysstore, "gemma4:12b")
+    monkeypatch.setattr(llm_runtime, "_SYSTEM_STORES", (str(sysstore),))
+    monkeypatch.delenv("OLLAMA_MODELS", raising=False)
+    monkeypatch.setattr(llm_runtime.Path, "home", lambda: tmp_path / "nohome")
+    cfg = Config(llm=LLMConfig(models_dir=str(empty), model="gemma4:12b"))
+    assert llm_runtime._resolve_models_dir(cfg) == str(sysstore)
+
+
+def test_resolve_keeps_first_candidate_when_no_store_has_model(tmp_path, monkeypatch):
+    first = tmp_path / "first"
+    (first / "manifests").mkdir(parents=True)
+    monkeypatch.setattr(llm_runtime, "_SYSTEM_STORES", ())
+    monkeypatch.delenv("OLLAMA_MODELS", raising=False)
+    monkeypatch.setattr(llm_runtime.Path, "home", lambda: tmp_path / "nohome")
+    cfg = Config(llm=LLMConfig(models_dir=str(first), model="gemma4:12b"))
+    assert llm_runtime._resolve_models_dir(cfg) == str(first)
+
+
+# ---------------------------------------------------------------------------
 # preflight script: cleans up on success AND failure
 # ---------------------------------------------------------------------------
 def _load_preflight_script() -> importlib:

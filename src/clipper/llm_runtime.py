@@ -50,6 +50,30 @@ _KILL_GRACE_S = 5.0
 _READY_POLL_S = 0.5
 _MAIN_PORT = 11434  # user's existing service — never touched
 
+# Well-known system-wide Ollama model stores to probe when the user-resolved
+# store is empty (e.g. this host keeps its models under /usr/share/ollama).
+_SYSTEM_STORES = ("/usr/share/ollama/.ollama/models",)
+
+
+def _store_has_model(store: str, model: str) -> bool:
+    """True if `store` looks like an Ollama store containing `model`.
+
+    Matches the manifest layout `store/manifests{,-v2}/<registry>/<path>/
+    <name>[/<tag>]` for e.g. `gemma4:12b`.
+    """
+    p = Path(store)
+    name, _, tag = model.partition(":")
+    if not name:
+        return False
+    suffix = f"{name}/{tag}" if tag else name
+    for root in ("manifests", "manifests-v2"):
+        try:
+            if any(p.glob(f"{root}/**/{suffix}")):
+                return True
+        except OSError:
+            return False
+    return False
+
 
 def _fail(reason: str, log_path: str | None = None) -> LLMError:
     if log_path:
@@ -58,13 +82,33 @@ def _fail(reason: str, log_path: str | None = None) -> LLMError:
 
 
 def _resolve_models_dir(cfg: Config) -> str:
-    """cfg.llm.models_dir -> $OLLAMA_MODELS -> ~/.ollama/models."""
-    if cfg.llm.models_dir:
-        return cfg.llm.models_dir
-    env = os.environ.get("OLLAMA_MODELS")
-    if env:
-        return env
-    return str(Path.home() / ".ollama" / "models")
+    """Pick the Ollama model store that actually contains `cfg.llm.model`.
+
+    Candidate order: `cfg.llm.models_dir` -> `$OLLAMA_MODELS` ->
+    `~/.ollama/models` -> known system stores. The FIRST candidate whose
+    `manifests/` tree contains the configured model wins; if none does, the
+    first candidate is used unchanged (so the downstream "/api/tags" error
+    still names the configured path).
+    """
+    dirs = list(dict.fromkeys(
+        c
+        for c in (
+            cfg.llm.models_dir,
+            os.environ.get("OLLAMA_MODELS"),
+            str(Path.home() / ".ollama" / "models"),
+            *_SYSTEM_STORES,
+        )
+        if c
+    ))
+    for d in dirs:
+        if _store_has_model(d, cfg.llm.model):
+            return d
+    logger.warning(
+        "no candidate Ollama model store contains '%s'; falling back to %s",
+        cfg.llm.model,
+        dirs[0],
+    )
+    return dirs[0]
 
 
 def _base_url(port: int) -> str:

@@ -16,7 +16,17 @@ must not drift from them).
   guarantee from Ollama.
 - The child **reuses the existing model store**
   (`cfg.llm.models_dir` -> `$OLLAMA_MODELS` -> `~/.ollama/models`).
-  `gemma4:12b` is already there: **no re-download** ever happens in M5.
+  `config.yaml` pins `llm.models_dir` to **`/usr/share/ollama/.ollama/models`**
+  — the store used by the user's running Ollama (rbilal is in the `ollama`
+  group, so the child can access it). `~/.ollama/models` does NOT contain
+  manifest data and must not be used. `gemma4:12b` is already there:
+  **no re-download** ever happens in M5.
+- Additionally, `_resolve_models_dir` (M5a fix) verifies that the chosen
+  store's `manifests/` tree actually contains `cfg.llm.model`; if not it
+  probes known system stores (`llm_runtime._SYSTEM_STORES`) and uses the
+  first one that does. Note: `Config` does not read `config.yaml` (env
+  `CLIPPER_*` / `.env` only), so the runtime source of truth for the models
+  dir is `cfg.llm.models_dir` -> env -> probes.
 - The child lives **only for the duration of a single M5 stage run** and is
   **always terminated afterwards** (normal exit AND exception paths):
   SIGTERM the process group, SIGKILL after 5s, wait for the port to be
@@ -71,7 +81,9 @@ Context manager yielding the base URL. On enter:
 3. If anything is already listening on `runtime_port`: fail cleanly with
    `LLMError` — **never kill unknown processes**.
 4. Resolve models dir: `cfg.llm.models_dir` -> `$OLLAMA_MODELS` ->
-   `~/.ollama/models`.
+   `~/.ollama/models` -> known system stores (`_SYSTEM_STORES`), picking the
+   first whose `manifests/` tree contains `cfg.llm.model`; if none does, the
+   first candidate is used (and `/api/tags` will name the missing model).
 5. Verify via `nvidia-smi` that GPU`cfg.llm.gpu_index` has **>= 12000 MiB**
    free VRAM (constant `MIN_FREE_VRAM_MIB` in `clipper.llm_runtime`).
 6. Spawn `["ollama", "serve"]` with `start_new_session=True` and env:
