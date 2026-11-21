@@ -17,7 +17,7 @@ llm:
   runtime_port: 11435
   gpu_index: 1
   model: "gemma4:12b"
-  models_dir: null          # null -> $OLLAMA_MODELS -> ~/.ollama/models
+  models_dir: "/usr/share/ollama/.ollama/models"   # shared store of the running Ollama (rbilal ∈ ollama group); ~/.ollama/models is empty
   num_ctx: 16384            # PER REQUEST, not cumulative
   num_batch: 256
   temperature: 0.1
