@@ -5,6 +5,9 @@ devices:
   ffmpeg: null
   ffprobe: null
   nvidia_smi: null
+  # M6a — vision-segment GPU (docs/spec/m6.md): GPU0 2080 Super only;
+  # the P100s (GPU1/GPU2) never do video.
+  vision: "cuda:0"
 
 # M5a — managed ephemeral Ollama runtime (docs/spec/llm.md, docs/spec/m5.md).
 # The user's existing Ollama on 127.0.0.1:11434 is NEVER touched; M5 manages
@@ -60,6 +63,12 @@ faces:
   detection_fps: 3.0
   min_detection_confidence: 0.5
   iou_threshold: 0.5
+  # M6a — per-clip vision segment (docs/spec/m6.md): 960x540 fit, aspect
+  # preserved, no padding, even dims; fps = min(native, vision_fps_cap),
+  # native 0/unknown -> vision_fps_cap.
+  vision_fps_cap: 30.0
+  vision_width: 960
+  vision_height: 540
 
 captions:
   font: Montserrat ExtraBold

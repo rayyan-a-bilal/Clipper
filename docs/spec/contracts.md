@@ -156,3 +156,47 @@ facecam
     "stages": dict[str, str]
 }
 ```
+## M6a — vision & layout contracts (`models/vision_artifacts.py`, see `docs/spec/m6.md`)
+
+```python
+# VisionSegmentInfo — one rendered per-clip vision segment (960x540 fit,
+# aspect preserved, no padding, even dims; fps = min(native, 30), native
+# 0/unknown -> 30). NOT a persisted artifact (no schema_version).
+{
+    "clip_id": str,
+    "path": str,
+    "width": int,
+    "height": int,
+    "fps": float,
+    "frame_count": int,
+    "source_start": float,   # clip time in the SOURCE video
+    "source_end": float
+}
+
+# FaceDetection — one detection in a vision frame (x/y/w/h normalized
+# 0..1 relative to the vision frame; t segment-local seconds).
+{
+    "t": float, "x": float, "y": float, "w": float, "h": float, "score": float
+}
+
+# RegionTrack — keys are M0 CropKey: t CLIP-RELATIVE (t=0 at clip start)
+# at NATIVE fps, coordinates in SOURCE pixels.
+{
+    "role": Literal["main", "top", "bottom", "face"],
+    "keys": list[CropKey]
+}
+
+# ClipLayoutArtifact — per-clip layout artifact (data/jobs/<job>/clips/<clip>/).
+{
+    "schema_version": 1,
+    "clip_id": str,
+    "layout": Layout,
+    "source_width": int,
+    "source_height": int,
+    "native_fps": float,
+    "tracks": list[RegionTrack],
+    "face_track_count": int,
+    "detector": str,
+    "layout_source": Literal["auto", "manual"]
+}
+```

@@ -20,6 +20,10 @@ class DevicesConfig(BaseSettings):
     ffmpeg: str | None = None
     ffprobe: str | None = None
     nvidia_smi: str | None = None
+    # M6a — vision-segment GPU (docs/spec/m6.md): GPU0 2080 Super only; the
+    # P100s never do video. Backward compatible: new key, existing configs
+    # (and env without CLIPPER_DEVICES_VISION) load unchanged.
+    vision: str = "cuda:0"
 
 class LLMConfig(BaseSettings):
     """LLM settings (M5a — managed Ollama runtime).
@@ -117,6 +121,12 @@ class FacesConfig(BaseSettings):
     detection_fps: float = 3.0
     min_detection_confidence: float = 0.5
     iou_threshold: float = 0.5
+    # M6a — per-clip vision segment parameters (docs/spec/m6.md):
+    # fps = min(native, vision_fps_cap); native 0/unknown -> vision_fps_cap;
+    # 960x540 fit, aspect preserved, no padding, even dims.
+    vision_fps_cap: float = 30.0
+    vision_width: int = 960
+    vision_height: int = 540
 
 class CaptionsConfig(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="CLIPPER_")

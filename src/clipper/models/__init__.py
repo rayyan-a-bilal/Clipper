@@ -141,3 +141,7 @@ from .selection_artifacts import MetadataResponse as MetadataResponse  # noqa: E
 from .selection_artifacts import SelectionArtifact as SelectionArtifact  # noqa: E402
 from .transcript_artifacts import SentencesArtifact as SentencesArtifact  # noqa: E402
 from .transcript_artifacts import WordsArtifact as WordsArtifact  # noqa: E402
+from .vision_artifacts import ClipLayoutArtifact as ClipLayoutArtifact  # noqa: E402
+from .vision_artifacts import FaceDetection as FaceDetection  # noqa: E402
+from .vision_artifacts import RegionTrack as RegionTrack  # noqa: E402
+from .vision_artifacts import VisionSegmentInfo as VisionSegmentInfo  # noqa: E402
