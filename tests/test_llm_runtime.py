@@ -370,3 +370,105 @@ def test_preflight_success_and_failure(monkeypatch, capsys):
 
     monkeypatch.setattr(pf, "managed_ollama", _boom)
     assert pf.main() == 1
+
+
+# -- compute_app_gpus: robust nvidia-smi output handling ------------------
+
+# -- compute_app_gpus: robust nvidia-smi output handling ------------------
+
+
+class _RunResult:
+    def __init__(self, stdout: str = "", rc: int = 0):
+        self.stdout = stdout
+        self.returncode = rc
+
+
+def _glob_query() -> list[str]:
+    return [
+        "nvidia-smi",
+        "--query-compute-apps=process_name,pid,used_memory",
+        "--format=csv,noheader,nounits",
+    ]
+
+
+def _gpu_query(idx: int) -> list[str]:
+    return [
+        "nvidia-smi", "-i", str(idx), "--query-compute-apps=pid,used_memory",
+        "--format=csv,noheader,nounits",
+    ]
+
+
+@pytest.fixture
+def fake_nvidia_smi(monkeypatch):
+    """Route llm_runtime's subprocess.run to canned outputs per exact command."""
+    table: dict[tuple[str, ...], _RunResult] = {}
+    calls: list[list[str]] = []
+
+    def _set(cmd: list[str], result: _RunResult) -> None:
+        table[tuple(cmd)] = result
+
+    def _run(cmd, **kw):
+        calls.append(list(cmd))
+        match = table.get(tuple(cmd))
+        if match is not None:
+            return match
+        raise AssertionError(f"unexpected nvidia-smi command: {cmd}")
+
+    monkeypatch.setattr(subprocess, "run", _run, raising=True)
+    return _set, calls
+
+
+def test_compute_app_gpus_maps_paths_to_gpus(fake_nvidia_smi) -> None:
+    set_route, _ = fake_nvidia_smi
+    # nvidia-smi 58x reports the binary PATH as process_name here.
+    set_route(
+        _glob_query(),
+        _RunResult(stdout="/usr/local/lib/ollama/llama-server, 1234, 6694\n"),
+    )
+    # GPU0 has no apps; GPU1 and GPU2 both host the (multi-GPU) runner.
+    set_route(_gpu_query(0), _RunResult(stdout="[Not Found]\n\n"))
+    set_route(_gpu_query(1), _RunResult(stdout="1234, 6694\n"))
+    set_route(_gpu_query(2), _RunResult(stdout="1234, 10862\n"))
+
+    apps = llm_runtime.compute_app_gpus()
+    assert apps == {"/usr/local/lib/ollama/llama-server": {1, 2}}
+
+
+def test_compute_app_gpus_survives_driver_error_output(fake_nvidia_smi) -> None:
+    """Regression: nvidia-smi 58x rejects --query-gpu-compute-apps and prints
+    `ERROR: ...` + a blank line to stdout. The old join crashed with
+    IndexError('list index out of range') on the blank line."""
+    set_route, _ = fake_nvidia_smi
+    err = _RunResult(
+        stdout=(
+            "ERROR: Option --query-gpu-compute-apps=pid,used_memory is not "
+            "recognized. Please run 'nvidia-smi -h'.\n\n"
+        ),
+        rc=255,
+    )
+    set_route(_glob_query(), err)
+    for idx in (0, 1, 2):
+        set_route(_gpu_query(idx), err)
+
+    assert llm_runtime.compute_app_gpus() == {}
+
+
+def test_compute_app_gpus_matches_per_gpu_pid_lists(fake_nvidia_smi) -> None:
+    set_route, calls = fake_nvidia_smi
+    set_route(_glob_query(), _RunResult(stdout="ollama_llama_server, 4321, 500\n"))
+    set_route(_gpu_query(1), _RunResult(stdout="4321, 500\n"))
+    # Unrelated pids on other GPUs must not be attributed to our process.
+    set_route(_gpu_query(0), _RunResult(stdout="9999, 100\n"))
+    set_route(_gpu_query(2), _RunResult(stdout=""))
+
+    apps = llm_runtime.compute_app_gpus()
+    assert apps == {"ollama_llama_server": {1}}
+    # Per-GPU membership comes from `nvidia-smi -i <idx> ...` queries.
+    assert _gpu_query(1) in calls and _gpu_query(2) in calls
+
+
+def test_is_ollama_process_bare_and_path_names() -> None:
+    assert llm_runtime._is_ollama_process("/usr/local/lib/ollama/llama-server")
+    assert llm_runtime._is_ollama_process("ollama_llama_server")
+    assert llm_runtime._is_ollama_process("ollama")
+    assert not llm_runtime._is_ollama_process("python3")

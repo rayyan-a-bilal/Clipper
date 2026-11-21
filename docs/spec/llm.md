@@ -102,10 +102,16 @@ OLLAMA_MODELS        = <resolved models dir>
    `messages=[{user: "Reply with exactly: OK"}]`, `stream=false`,
    `options={num_ctx:16384, num_batch:256, num_predict:8}`,
    `keep_alive="5m"`. (One token — the model just needs to load.)
-10. Verify via `nvidia-smi --query-compute-apps` (+ per-GPU pid query) that
+10. Verify via `nvidia-smi --query-compute-apps` (+ per-GPU pid query) that
     an `ollama` / `ollama_llama_server` process occupies the GPU whose
     index==`cfg.llm.gpu_index` (the UUID that `nvidia-smi` reports for that
     index).
+    Host note (driver 580): `--query-gpu-compute-apps` is NOT supported (it
+    errors to stdout), so per-GPU membership uses `nvidia-smi -i <idx>
+    --query-compute-apps`, and nvidia-smi may report the binary PATH
+    (`/usr/local/lib/ollama/llama-server`) — the check matches on the
+    basename (`_is_ollama_process`). All malformed / `[Not Found]` lines from
+    nvidia-smi are skipped, never raised.
 
 Any failure at any step -> `LLMError` carrying the reason **and** the log
 path, and the child (if it was spawned) is torn down.

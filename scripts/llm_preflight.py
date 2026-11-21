@@ -9,10 +9,11 @@ success and on failure). Exit 0 on success, 1 on any failure.
 """
 
 import sys
+import traceback
 
 from pydantic import BaseModel
 
-from clipper.adapters.llm import LLMError, OllamaLLMClient
+from clipper.adapters.llm import OllamaLLMClient
 from clipper.config import Config
 from clipper.llm_runtime import compute_app_gpus, gpu_memory_rows, managed_ollama
 
@@ -38,8 +39,11 @@ def main() -> int:
                 "Preflight: confirm the model is serving.",
                 PreflightReply,
             )
-    except (LLMError, Exception) as e:  # noqa: B014
+    except Exception as e:  # noqa: B014
         print(f"FAIL: {e}", file=sys.stderr)
+        # Full chained traceback: the real cause often lives in __cause__
+        # (e.g. a startup error wrapped into LLMError with `from e`).
+        traceback.print_exc(file=sys.stderr)
         return 1
 
     gpu = rows_before.get(cfg.llm.gpu_index, {})

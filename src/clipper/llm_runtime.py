@@ -163,11 +163,19 @@ def gpu_memory_rows(nvidia_smi: str | None = None) -> dict[int, dict]:
     return rows
 
 
+_COMPUTE_APP_GPU_INDEXES = (0, 1, 2)
+
+
 def compute_app_gpus(nvidia_smi: str | None = None) -> dict[str, set[int]]:
     """Map running compute process -> set of GPU indices it occupies.
 
-    Joins the process list with the per-GPU process query. Processes
-    visible under more than one index (multi-GPUs) get every index listed.
+    Process list: `nvidia-smi --query-compute-apps=process_name,pid,used_memory`.
+    Per-GPU membership: `nvidia-smi -i <idx> --query-compute-apps=...` per
+    index — this host's nvidia-smi (58x) does NOT support
+    `--query-gpu-compute-apps`; its ERROR text (plus a blank line) is printed
+    to stdout, and malformed / `[Not Found]` / blank lines must be skipped,
+    never raise. Processes visible on more than one GPU (multi-GPU) get every
+    index listed.
     """
     exe = nvidia_smi or "nvidia-smi"
     out = subprocess.run(
@@ -180,31 +188,43 @@ def compute_app_gpus(nvidia_smi: str | None = None) -> dict[str, set[int]]:
         text=True,
         timeout=15,
     )
-    out_g = subprocess.run(
-        [
-            exe,
-            "--query-gpu-compute-apps=pid,used_memory",
-            "--format=csv,noheader,nounits",
-            "-i",
-            "0,1,2",
-        ],
-        capture_output=True,
-        text=True,
-        timeout=15,
-    )
-    maps: dict[str, set[int]] = {}
+    names: dict[str, str] = {}  # pid -> lowercased process_name
     for line in out.stdout.splitlines():
         parts = [p.strip() for p in line.split(",")]
         if len(parts) >= 2 and parts[1].isdigit():
-            pid = parts[1]
-            idxs = {
-                int(pline.split(",")[0].strip())
-                for pline in out_g.stdout.splitlines()
-                if len(pline.split(",")) and pline.split(",")[1].strip() == pid
-                and pline.split(",")[0].strip().isdigit()
-            }
-            maps[parts[0].lower()] = idxs
+            names[parts[1]] = parts[0].lower()
+    maps: dict[str, set[int]] = {name: set() for name in names.values()}
+    for idx in _COMPUTE_APP_GPU_INDEXES:
+        out_g = subprocess.run(
+            [
+                exe,
+                "-i",
+                str(idx),
+                "--query-compute-apps=pid,used_memory",
+                "--format=csv,noheader,nounits",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+        if out_g.returncode != 0:
+            continue
+        for line in out_g.stdout.splitlines():
+            parts = [p.strip() for p in line.split(",")]
+            if len(parts) >= 2 and parts[0].isdigit() and parts[0] in names:
+                maps[names[parts[0]]].add(idx)
     return maps
+
+
+def _is_ollama_process(process_name: str) -> bool:
+    """True for the `ollama serve` / llama-server binary, incl. full paths.
+
+    nvidia-smi reports the bare name (`ollama`, `ollama_llama_server`) on
+    some driver/service combos and the binary path on others
+    (`/usr/local/lib/ollama/llama-server`) — match on the basename.
+    """
+    base = process_name.rsplit("/", 1)[-1].lower()
+    return base in ("ollama", "ollama_llama_server", "llama-server", "ollama-server")
 
 
 def _spawn(
@@ -358,13 +378,13 @@ def managed_ollama(cfg: Config) -> Iterator[str]:
                 f"warm-up call failed: HTTP {warm.status_code} {body}", str(log_path),
             )
 
-        # Verify a compute app is on the UUID matching cfg.llm.gpu_index
+        # Verify a compute app is on cfg.llm.gpu_index
         # (process list from `nvidia-smi --query-compute-apps`).
         apps = compute_app_gpus(cfg.devices.nvidia_smi)
         on_target = [
             name
-            for name in ("ollama", "ollama_llama_server")
-            if name in apps and cfg.llm.gpu_index in apps[name]
+            for name, idxs in apps.items()
+            if _is_ollama_process(name) and cfg.llm.gpu_index in idxs
         ]
         if not on_target:
             raise _fail(
