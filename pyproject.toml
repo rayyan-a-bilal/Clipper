@@ -33,6 +33,9 @@ dependencies = [
     # requirement warning for this pair — that is expected.
     "scenedetect",
     "opencv-python-headless",
+    # M6b - YuNet ONNX face detector on GPU0 (CUDAExecutionProvider required;
+    # the adapter fails loudly rather than silently falling back to CPU)
+    "onnxruntime-gpu",
     # M5a — Ollama HTTP client (no `ollama` python package)
     "httpx",
     "pytest",

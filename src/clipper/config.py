@@ -127,6 +127,14 @@ class FacesConfig(BaseSettings):
     vision_fps_cap: float = 30.0
     vision_width: int = 960
     vision_height: int = 540
+    # M6b — YuNet ONNX face detector (docs/spec/m6.md): the detector runs
+    # the YuNet model at a fixed square input (det_size x det_size) on
+    # GPU0 via onnxruntime CUDAExecutionProvider.
+    model_path: str = "data/models/yunet.onnx"
+    score_threshold: float = 0.6
+    nms_threshold: float = 0.3
+    top_k: int = 5000
+    det_size: int = 640
 
 class CaptionsConfig(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="CLIPPER_")

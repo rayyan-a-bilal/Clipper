@@ -69,6 +69,14 @@ faces:
   vision_fps_cap: 30.0
   vision_width: 960
   vision_height: 540
+  # M6b — YuNet ONNX face detector (docs/spec/m6.md): runs on GPU0 via
+  # onnxruntime CUDAExecutionProvider (never silently on CPU). Download the
+  # model manually with `bash scripts/install_models.sh` (never in tests).
+  model_path: data/models/yunet.onnx
+  score_threshold: 0.6
+  nms_threshold: 0.3
+  top_k: 5000
+  det_size: 640
 
 captions:
   font: Montserrat ExtraBold
