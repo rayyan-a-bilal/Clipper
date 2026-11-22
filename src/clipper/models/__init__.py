@@ -31,6 +31,17 @@ class FaceTrack(BaseModel):
     persistence: float
     corner_affinity: Literal["tl", "tr", "bl", "br"] | None
 
+class TrackSummary(BaseModel):
+    """Summary of face tracks for one clip (M6c tracking pure logic).
+
+    Not a persisted artifact (no `schema_version`); computed in memory
+    by `clipper.tracking.summarize` from the per-clip face tracks.
+    """
+    dominant_track_id: int | None
+    persistent_track_ids: list[int]
+    facecam_candidate_track_ids: list[int]
+    side_by_side_pair: tuple[int, int] | None
+
 class Layout(StrEnum):
     center_crop = "center_crop"
     face_track = "face_track"

@@ -200,3 +200,17 @@ facecam
     "layout_source": Literal["auto", "manual"]
 }
 ```
+
+## M6c — track summary contract (`clipper.models`, see `docs/spec/m6.md` M6c)
+
+```python
+# TrackSummary — per-clip in-memory summary from tracking.summarize over
+# FaceTrack lists. NOT a persisted artifact (no schema_version, mirrors
+# VisionSegmentInfo); persistence/corner stats computed by tracking.track_stats.
+{
+    "dominant_track_id": Optional[int],          # highest persistence, tie-break larger mean_area
+    "persistent_track_ids": list[int],           # persistence >= 0.6
+    "facecam_candidate_track_ids": list[int],    # corner_affinity set AND persistence >= 0.8 AND mean_area < 0.04
+    "side_by_side_pair": Optional[tuple[int, int]]  # two persistent tracks, horizontally separated, mean_area within 2x
+}
+```
