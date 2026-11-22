@@ -15,11 +15,68 @@ Usage:
 may legitimately yield 0 faces; the device actually used is the point.)
 """
 
+import glob
 import os
 import sys
 import traceback
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
+
+
+def _cuda_libs_resolvable() -> bool:
+    """True if the CUDA 13 / cuDNN 9 runtime deps of onnxruntime's CUDA EP
+    are already on the dynamic loader path."""
+    import ctypes
+
+    for soname in ("libcublasLt.so.13", "libcudnn_ops.so.9", "libcudart.so.13"):
+        try:
+            ctypes.CDLL(soname)
+        except OSError:
+            return False
+    return True
+
+
+def _ensure_cuda_libs() -> None:
+    """Find CUDA 13 + cuDNN 9 libraries and re-exec once with them on
+    LD_LIBRARY_PATH (guarded).
+
+    onnxruntime's CUDAExecutionProvider dlopens `libcublasLt.so.13` +
+    cuDNN 9 at session creation. glibc's dlopen search paths are frozen at
+    exec time, so a mid-process env change is futile — we re-exec the
+    script exactly once with a corrected LD_LIBRARY_PATH (Ollama ships a
+    cuda_v13 bundle; cuDNN 9 lives in nvidia pip wheels)."""
+    if os.environ.get("_CLIPPER_CUDA_LIBS_FIX") == "1":
+        return  # already re-exec'd once; let the real error surface
+    if _cuda_libs_resolvable():
+        return
+    patterns = (
+        "/usr/local/lib/ollama/cuda_v*",
+        "/usr/local/cuda-*/lib64",
+        "/usr/lib/x86_64-linux-gnu",
+        os.path.expanduser("~/.local/share") + "/**/nvidia/cu13/lib",
+        os.path.expanduser("~/.local/share") + "/**/nvidia/cublas/lib",
+        os.path.expanduser("~/.local/share") + "/**/nvidia/cudnn/lib",
+        "/usr/local/cuda/lib64",
+    )
+    dirs: list[str] = []
+    for pat in patterns:
+        for d in sorted(glob.glob(pat, recursive=True)):
+            if os.path.isdir(d) and d not in dirs:
+                dirs.append(d)
+    need = ("libcublasLt.so.13", "libcudnn_ops.so.9", "libcudart.so.13")
+    covered = True
+    for soname in need:
+        if not any(os.path.exists(os.path.join(d, soname)) for d in dirs):
+            covered = False
+            break
+    if not covered:
+        return  # let the normal failure message report the problem
+    old = os.environ.get("LD_LIBRARY_PATH", "")
+    os.environ["LD_LIBRARY_PATH"] = ":".join(dirs) + ((":" + old) if old else "")
+    print("[preflight] CUDA 13/cuDNN 9 libs not on loader path; re-executing with")
+    print(f"[preflight] LD_LIBRARY_PATH={os.environ['LD_LIBRARY_PATH']}")
+    os.environ["_CLIPPER_CUDA_LIBS_FIX"] = "1"
+    os.execv(sys.executable, [sys.executable, os.path.abspath(__file__)] + sys.argv[1:])
 
 from clipper.adapters.faces import (  # noqa: E402
     FaceDetectorError,
@@ -51,13 +108,13 @@ def _dummy_frame(det_size: int):
         (160, 140, 120),
         -1,
     )
-    frame[rng.integers(0, h, size=(h // 20, 3)), :] = rng.integers(
-        0, 255, size=(h // 20, 1, 3)
-    ).astype(np.uint8)
+    rows = rng.integers(0, h, size=(h // 20,))
+    frame[rows, :] = rng.integers(0, 255, size=(h // 20, 1, 3)).astype(np.uint8)
     return frame
 
 
 def main() -> int:
+    _ensure_cuda_libs()
     cfg = Config.load_config()
     model_path = cfg.faces.model_path
     if not os.path.exists(model_path):

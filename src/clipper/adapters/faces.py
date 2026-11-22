@@ -85,6 +85,12 @@ def _validate_frame(frame_bgr) -> None:
         )
 
 
+def _sigmoid(x) -> np.ndarray:
+    """Stable sigmoid (input clipped so float32 exp cannot overflow)."""
+    x = np.clip(np.asarray(x, dtype=np.float32), -50.0, 50.0)
+    return 1.0 / (1.0 + np.exp(-x))
+
+
 class YuNetOnnxDetector:
     """YuNet ONNX face detector on GPU0 via onnxruntime CUDA EP.
 
@@ -157,25 +163,53 @@ class YuNetOnnxDetector:
         if self._session is None:
             raise FaceDetectorError("YuNetOnnxDetector is closed")
 
-    def _order_outputs(self, outputs: list):
-        """Model outputs -> (loc, conf, iou) by name; positional (0, 1, 2)
-        fallback only when the names are unrecognizable."""
-        by_name = {}
+    def _prepare_heads(self, outputs: list):
+        """Map raw YuNet outputs to `facedec` inputs: (loc (N,4), conf (N,2)).
+
+        Handles both published YuNet layouts (anchor order (level, row, col):
+        scales 8/16/32, i.e. 6400 + 1600 + 400 at 640x640):
+
+        1. Per-scale heads `cls_s`/`obj_s`/`bbox_s` (and `kps_s`) with
+           s in {8, 16, 32} — the actual OpenCV Zoo
+           `face_detection_yunet_2023mar.onnx` file.
+        2. Pre-merged `loc`/`conf` (and optional `iou`) — the layout shown
+           in the OpenCV `FaceDetectorYN` docs / used by unit-test mocks.
+
+        YuNet score convention: per-anchor `p = sigmoid(cls) * sigmoid(obj)`.
+        `facedec` computes `p = softmax([bg, fg])[fg]` — with `bg = 0` that
+        is exactly `sigmoid(fg)` — so `conf = [0, logit(p)]` reproduces the
+        model score bit-for-bit without touching the pure decoder.
+        """
+        idx: dict[str, int] = {}
         for i, nm in enumerate(self._output_names):
-            key = nm.replace("_", "")
-            if key in ("loc", "conf", "iou") and key not in by_name:
-                by_name[key] = i
-        if {"loc", "conf", "iou"} <= by_name.keys():
-            return (
-                outputs[by_name["loc"]],
-                outputs[by_name["conf"]],
-                outputs[by_name["iou"]],
-            )
-        if len(outputs) >= 3:
-            return (outputs[0], outputs[1], outputs[2])
+            idx.setdefault(nm, i)
+        scales = ("8", "16", "32")
+        if all(
+            f"{head}_{s}" in idx
+            for head in ("cls", "obj", "bbox")
+            for s in scales
+        ):
+            def _col(head: str) -> np.ndarray:
+                parts = []
+                for s in scales:
+                    arr = np.asarray(outputs[idx[f"{head}_{s}"]], dtype=np.float32)
+                    parts.append(np.reshape(arr, (-1, arr.shape[-1])))
+                return np.concatenate(parts)
+
+            loc = _col("bbox")
+            cls = _col("cls").reshape(-1)
+            obj = _col("obj").reshape(-1)
+            p = _sigmoid(cls) * _sigmoid(obj)
+            p = np.clip(p, 1e-7, 1.0 - 1e-7)
+            conf = np.stack((np.zeros_like(p), np.log(p / (1.0 - p))), axis=1)
+            return loc, conf
+        if "loc" in idx and "conf" in idx:
+            return outputs[idx["loc"]], outputs[idx["conf"]]
+        if len(outputs) >= 2:
+            return outputs[0], outputs[1]
         raise FaceDetectorError(
-            f"YuNet model returned {len(outputs)} outputs "
-            f"{self._output_names}; expected loc/conf/iou"
+            f"YuNet model returned unrecognized outputs {self._output_names}; "
+            "expected per-scale cls_/obj_/bbox_ heads or loc/conf"
         )
 
     def detect(self, frame_bgr, t: float) -> list[FaceDetection]:
@@ -191,11 +225,11 @@ class YuNetOnnxDetector:
         )
         blob = resized.transpose(2, 0, 1)[np.newaxis, ...].astype(np.float32)
         outputs = self._session.run(None, {self._input_name: blob})
-        loc, conf, iou = self._order_outputs(outputs)
+        loc, conf = self._prepare_heads(outputs)
         raw = facedec.decode_yunet(
             loc,
             conf,
-            iou,
+            None,  # iou head unused (soft-NMS hint); layout handled above
             input_w=self._det_size,
             input_h=self._det_size,
             score_threshold=float(cfg.faces.score_threshold),
