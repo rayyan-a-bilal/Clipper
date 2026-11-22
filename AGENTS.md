@@ -19,6 +19,7 @@
 ## Constraints
 - No new dependencies without asking first
 - No sudo/systemd/model downloads
+- `onnxruntime-gpu` 1.32 needs cuBLAS-13 + cuDNN-9, which are NOT installed system-wide (no sudo). They exist as user-local pip packages in the comfy-cli venv — `scripts/cuda_env.sh` sources `LD_LIBRARY_PATH` (`nvidia/cu13/lib` + `nvidia/cudnn/lib`) and pins `CUDA_VISIBLE_DEVICES=0` (2080S, cc 7.5; P100s cc 6.0 unsupported by ORT 1.32 CUDA EP). Run GPU jobs as: `source scripts/cuda_env.sh && python scripts/<job>.py ...`
 - One milestone at a time only
 - Blocked after 3 attempts -> write BLOCKED.md and ask
 - Definition of done: acceptance commands pass, ruff clean, tests green
