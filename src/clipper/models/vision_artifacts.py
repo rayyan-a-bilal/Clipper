@@ -62,7 +62,8 @@ class RegionTrack(BaseModel):
 
 class ClipLayoutArtifact(BaseModel):
     """Per-clip layout artifact, written to
-    `data/jobs/<job_id>/clips/<clip_id>/` by M6b (schema_version=1).
+    `data/jobs/<job_id>/clips/<clip_id>/` by the M6e layout stage
+    (`src/clipper/stages/layout.py`, schema_version=1).
 
     `layout_source` is `"auto"` (M6 decision) or `"manual"` (QC override,
     M9). `detector` records which detector produced the face tracks (e.g.
