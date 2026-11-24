@@ -4,6 +4,13 @@ Adapter implementations for clipper (GPU/ffmpeg/network/model access).
 
 from .llm import LLMClient, LLMError, MockLLM, OllamaLLMClient, get_llm_client
 from .media import FFmpegMediaAdapter, FixtureMediaAdapter, MediaAdapter, get_adapter
+from .render import (
+    FFmpegRenderAdapter,
+    FixtureRenderAdapter,
+    RenderAdapter,
+    get_render_adapter,
+    reset_render_adapter,
+)
 from .vision import (
     FFmpegVisionAdapter,
     FixtureVisionAdapter,
@@ -25,4 +32,9 @@ __all__ = [
     "FFmpegVisionAdapter",
     "FixtureVisionAdapter",
     "get_vision_adapter",
+    "RenderAdapter",
+    "FFmpegRenderAdapter",
+    "FixtureRenderAdapter",
+    "get_render_adapter",
+    "reset_render_adapter",
 ]
