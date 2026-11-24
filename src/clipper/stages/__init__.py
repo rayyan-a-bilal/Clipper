@@ -11,6 +11,7 @@ class StageError(Exception):
 from .analyze import run_analysis  # noqa: E402
 from .candidates import run_candidates  # noqa: E402
 from .ingest import compute_content_hash, run_ingest  # noqa: E402
+from .render import run_render  # noqa: E402
 from .score import run_scoring  # noqa: E402
 from .select import (  # noqa: E402
     run_clip_plans_stage,
@@ -28,4 +29,5 @@ __all__ = [
     "run_selection",
     "run_selection_stage",
     "run_clip_plans_stage",
+    "run_render",
 ]
