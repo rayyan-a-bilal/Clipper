@@ -7,6 +7,10 @@ GPU0 (RTX 2080 Super, `cuda:0`) ONLY for production render: NVDEC decode
 M7b implements the mezzanine path (per-clip NVDEC→NVENC 1080x1920 native
 fps) and per-clip audio extraction (AAC 48kHz stereo). M7c adds the final
 compose (ASS captions burn + loudnorm + NVENC final) and the thumbnail.
+M7e adds the DYNAMIC `face_track` mezzanine path: a `crop.cmd` sendcmd
+file written BESIDE the mezzanine drives the `crop` filter's x/y per
+clip-relative key (`plan.crop_path`, M6e).
+
 The render STAGE is a LATER M7 milestone — NOT implemented here.
 
 M7 fixed decisions implemented (docs/spec/m7.md):
@@ -29,6 +33,15 @@ M7 fixed decisions implemented (docs/spec/m7.md):
     CPU fallback (scale_cuda absent, warned loudly):
                crop=w=trunc(ih*9/16/2)*2:h=ih:x=(iw-ow)/2:y=0,
                scale={w}:{h}:flags=lanczos
+
+`face_track` dynamic vf (docs/spec/m7.md M7e) — `crop.cmd` = the sendcmd
+file written beside the mezzanine (`sendcmd_filter_available()` must be
+ture; a build without `sendcmd`/`crop` fails LOUDLY):
+
+    sendcmd=f={crop.cmd},crop=w={w}:h={h}:x={x0}:y={y0},
+    hwupload_cuda,scale_cuda={w}:{h}:format=nv12
+    (crop w/h/x0/y0 = the first `plan.crop_path` key; dense per-key
+    x/y commands come from `clipper.render_paths.crop_cmd_from_path`)
 """
 
 import logging
@@ -42,10 +55,12 @@ from ..config import Config
 from ..models import (
     ClipAudioInfo,
     ClipPlan,
+    CropKey,
     Layout,
     MezzanineInfo,
     RenderArtifact,
 )
+from ..render_paths import CROP_CMD_FILENAME, crop_cmd_from_path
 from .media import FFmpegMediaAdapter, MediaError
 
 logger = logging.getLogger(__name__)
@@ -160,6 +175,8 @@ class FFmpegRenderAdapter:
         self._media = FFmpegMediaAdapter()
         self._scale_cuda: bool | None = None  # lazily detected + cached
         self._ass_filter: bool | None = None  # lazily detected + cached
+        self._sendcmd: bool | None = None  # lazily detected + cached (M7e)
+        self._crop_filter: bool | None = None  # lazily detected (M7e)
 
     # -- scale_cuda capability detection ---------------------------------
 
@@ -189,6 +206,48 @@ class FFmpegRenderAdapter:
         # filter merely CONTAINING the letters.
         return name in out.replace("\n", " ").split()
 
+    # -- M7e: sendcmd crop-command support --------------------------------
+
+    def sendcmd_filter_available(self) -> bool:
+        """`ffmpeg -filters` contains `sendcmd` (cached per instance)."""
+        if self._sendcmd is None:
+            self._sendcmd = self._filter_available("sendcmd")
+        return self._sendcmd
+
+    def crop_filter_available(self) -> bool:
+        """`ffmpeg -filters` contains the `crop` filter (cached)."""
+        if self._crop_filter is None:
+            self._crop_filter = self._filter_available("crop")
+        return self._crop_filter
+
+    def _require_sendcmd_support(self) -> None:
+        """The face_track path needs the `crop` filter to accept commands
+        via `sendcmd` (docs/spec/m7.md M7e) — a build without either
+        filter FAILS LOUDLY (no silent path, decision 2)."""
+        missing = []
+        if not self.sendcmd_filter_available():
+            missing.append("sendcmd")
+        if not self.crop_filter_available():
+            missing.append("crop")
+        if missing:
+            raise MediaError(
+                f"ffmpeg build lacks the {'/'.join(missing)} filter(s) — the "
+                "face_track mezzanine drives the crop filter's x/y via "
+                "sendcmd (docs/spec/m7.md M7e). Reinstall an ffmpeg build "
+                "that includes them."
+            )
+
+    @staticmethod
+    def _face_track_first_key(plan: ClipPlan) -> CropKey:
+        """First (t=0) key of `plan.crop_path` (clean MediaError)."""
+        if not plan.crop_path:
+            raise MediaError(
+                "face_track layout needs plan.crop_path (the M6e main-track "
+                "keys starting at t=0) — produced by the M6e layout stage "
+                "(scripts/layout_job.py)"
+            )
+        return plan.crop_path[0]
+
     # -- command builders (public for CPU-only testing) ------------------
 
     def mezzanine_command(
@@ -211,14 +270,26 @@ class FFmpegRenderAdapter:
         - `cpu_render=True`: NO `-hwaccel`, CPU scale, `libx264 -crf`
           (explicit DEBUG path only; loudly warned at construction).
 
-        `center_crop` is the ONLY renderable layout in M7b (static path).
+        `center_crop` (static, M7b) and `face_track` (dynamic sendcmd
+        crop, M7e) are the renderable layouts; `split_screen`/`facecam`
+        are NOT yet implemented (later M7).
         """
         resolved = _resolve_layout(layout)
-        if resolved is not Layout.center_crop:
+        if resolved is Layout.center_crop:
+            crop_vf = _CENTER_CROP_VF
+        elif resolved is Layout.face_track:
+            first = self._face_track_first_key(plan)
+            crop_cmd_path = Path(dst).resolve().parent / CROP_CMD_FILENAME
+            crop_vf = (
+                f"sendcmd=f={crop_cmd_path},"
+                f"crop=w={int(first.w)}:h={int(first.h)}:"
+                f"x={int(first.x)}:y={int(first.y)}"
+            )
+        else:
             raise MediaError(
-                f"layout {resolved.value!r} is not renderable in M7b — "
-                "only the center_crop static path is implemented "
-                "(docs/spec/m7.md M7b); tracking/composite rendering is a "
+                f"layout {resolved.value!r} is not renderable yet — "
+                "center_crop (M7b) and face_track (M7e) are implemented "
+                "(docs/spec/m7.md); split_screen/facecam rendering is a "
                 "later M7 milestone"
             )
         native = float(native_fps)
@@ -229,7 +300,7 @@ class FFmpegRenderAdapter:
             )
         width = int(cfg.render.output_width)
         height = int(cfg.render.output_height)
-        vf = _CENTER_CROP_VF
+        vf = crop_vf
         if self.cpu_render:
             vf = f"{vf},scale={width}:{height}:flags=lanczos"
             cmd: list[str] = [
@@ -357,14 +428,19 @@ class FFmpegRenderAdapter:
         """Render one clip's mezzanine (center_crop static path, M7b)."""
         if not os.path.exists(source):
             raise MediaError(f"Source file does not exist: {source}")
+        resolved = _resolve_layout(layout)
         if native_fps is None:
             native_fps = self._media.probe(source).fps
+        if resolved is Layout.face_track:
+            self._require_sendcmd_support()
         gpu_scale = not self.cpu_render and self.scale_cuda_available()
         if not self.cpu_render and not gpu_scale:
             logger.warning(CPU_SCALE_FALLBACK_WARNING)
         elif self.cpu_render:
             logger.warning(CPU_RENDER_WARNING)
         Path(dst).parent.mkdir(parents=True, exist_ok=True)
+        if resolved is Layout.face_track:
+            self._write_crop_cmd(dst, plan.crop_path, float(native_fps))
         self._run_ffmpeg(self.mezzanine_command(
             source, plan, layout, dst, cfg, native_fps, gpu_scale
         ))
@@ -376,6 +452,23 @@ class FFmpegRenderAdapter:
             fps=float(probe.fps),
             duration_s=float(probe.duration_s),
         )
+
+    @staticmethod
+    def _write_crop_cmd(
+        dst: str, crop_path: list[CropKey], native_fps: float
+    ) -> None:
+        """M7e: write `crop.cmd` BESIDE the mezzanine (`dst`) from the
+        pure generator. Clean `MediaError` on an invalid path (no
+        partial render)."""
+        try:
+            content = crop_cmd_from_path(crop_path, native_fps)
+        except ValueError as e:
+            raise MediaError(
+                f"invalid face_track crop_path: {e} — produced by the "
+                "M6e layout stage (scripts/layout_job.py)"
+            ) from e
+        (Path(dst).parent / CROP_CMD_FILENAME).write_text(
+            content, encoding="utf-8")
 
     def extract_audio(
         self,
@@ -541,14 +634,34 @@ class FixtureRenderAdapter:
         native_fps: float | None = None,
     ) -> MezzanineInfo:
         resolved = _resolve_layout(layout)
-        if resolved is not Layout.center_crop:
+        if resolved is not Layout.center_crop and \
+                resolved is not Layout.face_track:
             raise MediaError(
-                f"layout {resolved.value!r} is not renderable in M7b — "
-                "only the center_crop static path is implemented "
-                "(docs/spec/m7.md M7b)"
+                f"layout {resolved.value!r} is not renderable yet — only "
+                "the center_crop static path (M7b) and the face_track "
+                "dynamic path (M7e) are implemented (docs/spec/m7.md)"
             )
         Path(dst).parent.mkdir(parents=True, exist_ok=True)
-        Path(dst).write_text("fixture mezzanine (M7b)")
+        if resolved is Layout.face_track:
+            if not plan.crop_path:
+                raise MediaError(
+                    "face_track layout needs plan.crop_path (the M6e "
+                    "main-track keys starting at t=0) — produced by the "
+                    "M6e layout stage (scripts/layout_job.py)"
+                )
+            try:
+                content = crop_cmd_from_path(
+                    plan.crop_path,
+                    float(native_fps) if native_fps else 30.0,
+                )
+            except ValueError as e:
+                raise MediaError(
+                    f"invalid face_track crop_path: {e} — produced by "
+                    f"the M6e layout stage (scripts/layout_job.py)"
+                ) from e
+            (Path(dst).parent / CROP_CMD_FILENAME).write_text(
+                content, encoding="utf-8")
+        Path(dst).write_text("fixture mezzanine (M7b/M7e)")
         return MezzanineInfo(
             path=os.path.abspath(dst),
             width=int(cfg.render.output_width),

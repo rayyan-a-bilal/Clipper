@@ -82,24 +82,35 @@ def _words_artifact() -> WordsArtifact:
     return WordsArtifact(schema_version=1, words=_words())
 
 
-def _layout_artifact(clip_id: str) -> dict:
-    """A VALID M6e center_crop static layout (faces == 0, decision 8):
-    one static exact-9:16 main track, zero face tracks."""
-    # exact 9:16 fitted into 1920x1080: h=1080 -> w=607.5 -> even 606
-    keys = [
-        CropKey(t=round(i * (END - START) / 30.0, 3), x=(1920 - 606) // 2,
-                y=0, w=606, h=1080)
-        for i in range(25)
-    ]
+def _layout_artifact(
+    clip_id: str,
+    layout: str = "center_crop",
+    face_track_count: int = 0,
+) -> dict:
+    """A VALID M6e layout (`faces == 0` center_crop default, decision 8):
+    one static exact-9:16 main track; face_track variant has a moving
+    full-height window (t=0 first, native 30fps key grid)."""
+    x0 = (1920 - 608) // 2
+    if layout == "face_track":
+        keys = [
+            CropKey(t=i / 30.0, x=x0 + i, y=0, w=608, h=1080)
+            for i in range(25)
+        ]
+    else:  # exact 9:16 fitted into 1920x1080: h=1080 -> w=607.5 -> even 606
+        keys = [
+            CropKey(t=round(i * (END - START) / 30.0, 3), x=(1920 - 606) // 2,
+                    y=0, w=606, h=1080)
+            for i in range(25)
+        ]
     artifact = {
         "schema_version": 1,
         "clip_id": clip_id,
-        "layout": "center_crop",
+        "layout": layout,
         "source_width": 1920,
         "source_height": 1080,
         "native_fps": 30.0,
         "tracks": [{"role": "main", "keys": [k.model_dump() for k in keys]}],
-        "face_track_count": 0,
+        "face_track_count": face_track_count,
         "detector": "fixture-face-detector",
         "layout_source": "auto",
     }
@@ -175,6 +186,28 @@ def _setup(
                 encoding="utf-8",
             )
     return cfg
+
+
+def _setup_face_track(tmp_path) -> tuple[Config, ClipPlan]:
+    """One face_track clip: M6e-style layout.json + a ClipPlan whose
+    `crop_path` holds the main-track keys (t=0 first, M6e rule)."""
+    clip_id = f"{JOB_ID}-clip01"
+    plan = _plan(clip_id, START, END)
+    plan.layout = Layout.face_track
+    keys = [
+        CropKey(t=i / 30.0, x=(1920 - 608) // 2 + i, y=0, w=608, h=1080)
+        for i in range(25)
+    ]
+    plan.crop_path = keys
+    cfg = _setup(tmp_path, plans=[plan], with_layouts=False)
+    clip_dir = _job_dir(cfg) / "clips" / clip_id
+    clip_dir.mkdir(parents=True, exist_ok=True)
+    artifact = _layout_artifact(clip_id, layout="face_track",
+                                face_track_count=1)
+    (clip_dir / "layout.json").write_text(
+        json.dumps(artifact, indent=2) + "\n", encoding="utf-8",
+    )
+    return cfg, plan
 
 
 def _run(cfg: Config, render=None, **kwargs) -> dict:
@@ -463,15 +496,57 @@ def test_no_warning_without_cpu_render(tmp_path, caplog):
     ]
 
 
-def test_non_center_crop_layout_fails_cleanly(tmp_path):
+def test_face_track_layout_renders_cleanly(tmp_path):
+    """M7e: the dynamic face_track path renders end-to-end (stage level)
+    on the CPU-only fixture adapter: crop.cmd lands BESIDE the mezzanine,
+    all six outputs exist, status updated."""
+    cfg, plan = _setup_face_track(tmp_path)
+    render = _RecordingRender()
+    summary = _run(cfg, render)
+    cid = f"{JOB_ID}-clip01"
+
+    assert summary["skipped"] is False
+    rec = summary["clips"][0]
+    assert rec["layout"] == "face_track"
+    assert rec["face_track_count"] == 1
+
+    clip_dir = _job_dir(cfg) / "clips" / cid
+    assert (clip_dir / "crop.cmd").is_file()  # write beside crop.cmd
+    assert (clip_dir / "mezzanine.mp4").is_file()
+    crop_cmd_lines = (
+        (clip_dir / "crop.cmd").read_text(encoding="utf-8"
+                                          ).splitlines())
+    assert crop_cmd_lines[0] == f"0 crop x {plan.crop_path[0].x}, crop y 0;"
+
+    files = _clip_files(cfg, cid)
+    assert files >= {
+        "mezzanine.mp4", "audio.m4a", "captions.ass",
+        "final.mp4", "thumbnail.jpg", "render.json",
+    }
+    art = RenderArtifact.model_validate_json(
+        (clip_dir / "render.json").read_text(encoding="utf-8")
+    )
+    assert art.clip_id == cid
+    assert art.encoder == "h264_nvenc"
+
+    row = _clip_row(cfg, cid)
+    assert row["status"] == "rendered"
+    assert row["plan"]["layout"] == "face_track"
+    assert [k["t"] for k in row["plan"]["crop_path"]][0] == 0.0
+    stage_state, job_state = _stage_and_job_state(cfg)
+    assert stage_state == "done"
+    assert job_state == "queued"
+
+
+def test_unimplemented_layout_fails_cleanly(tmp_path):
     cfg = _setup(tmp_path)
     artifact = _layout_artifact(f"{JOB_ID}-clip01")
-    artifact["layout"] = "face_track"
+    artifact["layout"] = "split_screen"
     (
         _job_dir(cfg) / "clips" / f"{JOB_ID}-clip01" / "layout.json"
     ).write_text(json.dumps(artifact, indent=2) + "\n", encoding="utf-8")
 
-    with pytest.raises(StageError, match=r"face_track"):
+    with pytest.raises(StageError, match=r"split_screen"):
         _run(cfg)
     stage_state, job_state = _stage_and_job_state(cfg)
     assert stage_state == "failed"

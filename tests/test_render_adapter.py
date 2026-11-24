@@ -25,11 +25,13 @@ from clipper.config import Config
 from clipper.models import (
     ClipAudioInfo,
     ClipPlan,
+    CropKey,
     Layout,
     MezzanineInfo,
     ProbeResult,
     RenderArtifact,
 )
+from clipper.render_paths import CROP_CMD_FILENAME, crop_cmd_from_path
 
 CFG = Config()
 
@@ -47,6 +49,35 @@ FILTERS_NO_ASS = (  # M7c: an ffmpeg build WITHOUT the libass `ass` filter
     " T. scale        V->V       Scale the size of the video\n"
     " T. scale_cuda   V->V       GPU scaler\n"
 )
+# M7e: an ffmpeg build WITHOUT the `sendcmd` filter (or without `crop`)
+FILTERS_NO_SENDCMD = (
+    " T. scale        V->V       Scale the size of the video\n"
+    " ... ass         V->V       Render text subtitles on top of input\n"
+    " T. scale_cuda   V->V       GPU scaler for hardware-accelerated streams\n"
+    " T. crop         V->V       Crop the input video\n"
+)
+FILTERS_NO_CROP = (
+    " T. scale        V->V       Scale the size of the video\n"
+    " ... ass         V->V       Render text subtitles on top of input\n"
+    " T. scale_cuda   V->V       GPU scaler for hardware-accelerated streams\n"
+    " T. sendcmd      V->N       Send commands to filters\n"
+)
+
+
+FILTERS_GPU_SENDCMD = (
+    " T. scale        V->V       Scale the size of the video\n"
+    " ... ass         V->V       Render text subtitles on top of input\n"
+    " T. scale_cuda   V->V       GPU scaler for hardware-accelerated streams\n"
+    " T. hwupload_cuda  N->N     Upload to cuda\n"
+    " T. sendcmd      V->N       Send commands to filters\n"
+    " T. crop         V->V       Crop the input video\n"
+)
+FILTERS_CPU_SENDCMD = (
+    " T. scale        V->V       Scale the size of the video\n"
+    " ... ass         V->V       Render text subtitles on top of input\n"
+    " T. sendcmd      V->N       Send commands to filters\n"
+    " T. crop         V->V       Crop the input video\n"
+)
 
 
 def make_plan(start: float = 10.0, end: float = 25.0) -> ClipPlan:
@@ -57,6 +88,31 @@ def make_plan(start: float = 10.0, end: float = 25.0) -> ClipPlan:
         end=end,
         layout=Layout.center_crop,
         crop_path=[],
+        weighted_score=8.0,
+        title="t",
+        hook_overlay="",
+        description="",
+        hashtags=[],
+        status="pending_qc",
+    )
+
+
+def make_face_plan(n_keys: int = 5, fps: float = 30.0) -> ClipPlan:
+    """An M7e face_track plan: source 1920x1080, full-height 9:16 window
+    (w=608, h=1080) tracking a face drifting 656 -> 700 px (t=0 first)."""
+    keys = [
+        CropKey(
+            t=round(i / fps, 6), x=656 + i * 11, y=0, w=608, h=1080,
+        )
+        for i in range(n_keys)
+    ]
+    return ClipPlan(
+        clip_id="jobX-clip01",
+        job_id="jobX",
+        start=10.0,
+        end=25.0,
+        layout=Layout.face_track,
+        crop_path=keys,
         weighted_score=8.0,
         title="t",
         hook_overlay="",
@@ -127,12 +183,20 @@ def test_center_crop_command_hwaccel_nvenc_no_libx264():
     assert cmd[-1] == "out.mp4"
 
 
-def test_mezzanine_command_rejects_noncenter_crop_layouts():
+def test_mezzanine_command_rejects_unimplemented_layouts():
     adapter = FFmpegRenderAdapter()
-    for layout in (Layout.face_track, Layout.split_screen, Layout.facecam, "bogus"):
+    for layout in (Layout.split_screen, Layout.facecam, "bogus"):
         with pytest.raises(MediaError):
             adapter.mezzanine_command(
                 "s", make_plan(), layout, "d", CFG, native_fps=30.0, gpu_scale=True)
+
+
+def test_mezzanine_command_rejects_face_track_without_crop_path():
+    adapter = FFmpegRenderAdapter()
+    with pytest.raises(MediaError, match=r"crop_path"):
+        adapter.mezzanine_command(
+            "s", make_face_plan(n_keys=0),
+            Layout.face_track, "d", CFG, native_fps=30.0, gpu_scale=True)
 
 
 def test_mezzanine_command_rejects_nonpositive_native_fps():
@@ -141,6 +205,129 @@ def test_mezzanine_command_rejects_nonpositive_native_fps():
         adapter.mezzanine_command(
             "s", make_plan(), Layout.center_crop, "d", CFG,
             native_fps=0.0, gpu_scale=True)
+
+
+# -- mezzanine: M7e face_track dynamic sendcmd crop -----------------------
+
+def test_face_track_command_sendcmd_crop_nvenc_no_libx264():
+    adapter = FFmpegRenderAdapter()
+    plan = make_face_plan()
+    cmd = adapter.mezzanine_command(
+        "src.mp4", plan, Layout.face_track, "out/clip/mezzanine.mp4",
+        CFG, native_fps=30.0, gpu_scale=True)
+    assert cmd[0] == "ffmpeg"
+    assert "-hwaccel" in cmd and cmd[cmd.index("-hwaccel") + 1] == "cuda"
+    assert "h264_nvenc" in cmd
+    assert "libx264" not in cmd
+    assert "-preset" in cmd and cmd[cmd.index("-preset") + 1] == "p5"
+    assert "-cq" in cmd and cmd[cmd.index("-cq") + 1] == "16"
+    assert "-an" in cmd
+    assert cmd.index("-i") < cmd.index("-vf")
+    vf = cmd[cmd.index("-vf") + 1]
+    assert vf.startswith("sendcmd=f=")
+    crop_cmd_path = (
+        Path("out/clip/mezzanine.mp4").resolve().parent / CROP_CMD_FILENAME)
+    assert f"sendcmd=f={crop_cmd_path}," in vf
+    first = plan.crop_path[0]
+    assert f"crop=w={first.w}:h={first.h}:x={first.x}:y={first.y}" in vf
+    assert "hwupload_cuda,scale_cuda=1080:1920:format=nv12" in vf
+    # sendcmd BEFORE the crop filter (it drives the crop filter's x/y)
+    assert vf.index("sendcmd") < vf.index("crop=")
+
+
+def test_render_mezzanine_face_track_writes_crop_cmd_beside_mezzanine(
+        tmp_path, monkeypatch):
+    fake = FakeFFmpeg(filters_out=FILTERS_GPU_SENDCMD)
+    install_fake(monkeypatch, fake)
+    adapter = FFmpegRenderAdapter()
+    monkeypatch.setattr(adapter._media, "probe", lambda p: probe_result())
+    src = tmp_path / "source.mp4"
+    src.write_bytes(b"fake")
+    clip_dir = tmp_path / "clips" / "jobX-clip01"
+    dst = clip_dir / "mezzanine.mp4"
+    plan = make_face_plan(n_keys=121)  # dense 4s @ 30fps key grid
+    info = adapter.render_mezzanine(str(src), plan, Layout.face_track,
+                                    str(dst), CFG, native_fps=30.0)
+    assert isinstance(info, MezzanineInfo)
+    # crop.cmd written BESIDE the mezzanine
+    crop_cmd_file = clip_dir / CROP_CMD_FILENAME
+    assert crop_cmd_file.is_file()
+    content = crop_cmd_file.read_text(encoding="utf-8")
+    assert content == crop_cmd_from_path(plan.crop_path, 30.0)
+    # exactly one render invocation; vf drives the crop.cmd file
+    render_calls = [c for c in fake.calls if "-filters" not in c]
+    assert len(render_calls) == 1
+    vf = render_calls[0][render_calls[0].index("-vf") + 1]
+    assert f"sendcmd=f={crop_cmd_file.resolve()}" in vf
+
+
+def test_face_track_cpu_scale_fallback_keeps_nvenc_and_warns(
+        tmp_path, monkeypatch, caplog):
+    fake = FakeFFmpeg(filters_out=FILTERS_CPU_SENDCMD)
+    install_fake(monkeypatch, fake)
+    adapter = FFmpegRenderAdapter()
+    monkeypatch.setattr(adapter._media, "probe", lambda p: probe_result())
+    src = tmp_path / "source.mp4"
+    src.write_bytes(b"fake")
+    with caplog.at_level("WARNING"):
+        adapter.render_mezzanine(str(src), make_face_plan(), Layout.face_track,
+                                 str(tmp_path / "m.mp4"), CFG,
+                                 native_fps=30.0)
+    assert any(CPU_SCALE_FALLBACK_WARNING in m for m in caplog.messages)
+    render_calls = [c for c in fake.calls if "-filters" not in c]
+    assert len(render_calls) == 1
+    vf = render_calls[0][render_calls[0].index("-vf") + 1]
+    assert vf.startswith("sendcmd=f=")
+    assert "crop=w=608:h=1080:x=656:y=0" in vf
+    assert "scale=1080:1920:flags=lanczos" in vf
+    assert "scale_cuda" not in vf and "hwupload_cuda" not in vf
+    assert "h264_nvenc" in render_calls[0]  # NVENC retained
+    assert "libx264" not in render_calls[0]
+
+
+def test_face_track_sendcmd_unavailable_raises_cleanly(
+        tmp_path, monkeypatch):
+    fake = FakeFFmpeg(filters_out=FILTERS_NO_SENDCMD)
+    install_fake(monkeypatch, fake)
+    adapter = FFmpegRenderAdapter()
+    monkeypatch.setattr(adapter._media, "probe", lambda p: probe_result())
+    src = tmp_path / "source.mp4"
+    src.write_bytes(b"fake")
+    with pytest.raises(MediaError, match="sendcmd"):
+        adapter.render_mezzanine(str(src), make_face_plan(), Layout.face_track,
+                                 str(tmp_path / "m.mp4"), CFG, native_fps=30.0)
+    assert [c for c in fake.calls if "-filters" not in c] == []  # no encode
+    assert not (tmp_path / CROP_CMD_FILENAME).exists()
+
+
+def test_face_track_crop_filter_unavailable_raises_cleanly(
+        tmp_path, monkeypatch):
+    fake = FakeFFmpeg(filters_out=FILTERS_NO_CROP)
+    install_fake(monkeypatch, fake)
+    adapter = FFmpegRenderAdapter()
+    monkeypatch.setattr(adapter._media, "probe", lambda p: probe_result())
+    src = tmp_path / "source.mp4"
+    src.write_bytes(b"fake")
+    with pytest.raises(MediaError, match="crop"):
+        adapter.render_mezzanine(str(src), make_face_plan(), Layout.face_track,
+                                 str(tmp_path / "m.mp4"), CFG, native_fps=30.0)
+    assert [c for c in fake.calls if "-filters" not in c] == []
+
+
+def test_face_track_rejects_crop_path_not_starting_at_t0(
+        tmp_path, monkeypatch):
+    fake = FakeFFmpeg(filters_out=FILTERS_GPU_SENDCMD)
+    install_fake(monkeypatch, fake)
+    adapter = FFmpegRenderAdapter()
+    src = tmp_path / "source.mp4"
+    src.write_bytes(b"fake")
+    plan = make_face_plan()
+    plan.crop_path = plan.crop_path[1:]  # first key t != 0
+    with pytest.raises(MediaError, match="t=0"):
+        adapter.render_mezzanine(str(src), plan, Layout.face_track,
+                                 str(tmp_path / "d.mp4"), CFG, native_fps=30.0)
+    assert [c for c in fake.calls if "-filters" not in c] == []
+    assert not (tmp_path / "d.mp4").exists()
 
 
 # -- audio command --------------------------------------------------------
@@ -387,8 +574,36 @@ def test_fixture_mezzanine_honours_native_fps_and_rejects_bad_layout(tmp_path):
                                     str(tmp_path / "m.mp4"), CFG, native_fps=24.0)
     assert info.fps == pytest.approx(24.0)
     with pytest.raises(MediaError):
-        adapter.render_mezzanine("s", make_plan(), Layout.face_track,
+        adapter.render_mezzanine("s", make_plan(), Layout.split_screen,
                                  str(tmp_path / "m2.mp4"), CFG)
+    with pytest.raises(MediaError):
+        adapter.render_mezzanine("s", make_plan(), Layout.facecam,
+                                 str(tmp_path / "m3.mp4"), CFG)
+
+
+def test_fixture_face_track_writes_crop_cmd_beside(tmp_path):
+    adapter = FixtureRenderAdapter()
+    clip_dir = tmp_path / "clips" / "jobX-clip01"
+    dst = clip_dir / "mezzanine.mp4"
+    plan = make_face_plan()
+    info = adapter.render_mezzanine("s", plan, Layout.face_track,
+                                    str(dst), CFG, native_fps=30.0)
+    assert dst.exists()
+    assert isinstance(info, MezzanineInfo)
+    assert (info.width, info.height) == (1080, 1920)
+    crop_cmd_file = clip_dir / CROP_CMD_FILENAME
+    assert crop_cmd_file.is_file()
+    assert crop_cmd_file.read_text(
+        encoding="utf-8") == crop_cmd_from_path(plan.crop_path, 30.0)
+
+
+def test_fixture_face_track_rejects_empty_crop_path(tmp_path):
+    adapter = FixtureRenderAdapter()
+    empty = make_face_plan(n_keys=0)
+    with pytest.raises(MediaError, match="crop_path"):
+        adapter.render_mezzanine("s", empty, Layout.face_track,
+                                 str(tmp_path / "m9.mp4"), CFG)
+    assert not (tmp_path / "m9.mp4").exists()
 
 
 def test_fixture_audio_contract(tmp_path):
