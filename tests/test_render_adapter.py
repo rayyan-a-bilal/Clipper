@@ -1,13 +1,16 @@
-"""M7b CPU-only tests: render adapter (NVDEC/NVENC mezzanine + audio).
+"""M7b/M7c CPU-only tests: render adapter (NVDEC/NVENC mezzanine + audio
++ final compose + thumbnail).
 
 All ffmpeg I/O is mocked via `subprocess.run` — no GPU, no real ffmpeg,
-no network, no downloads (docs/spec/m7.md M7b).
+no network, no downloads (docs/spec/m7.md M7b/M7c).
 """
 
 import subprocess
+from pathlib import Path
 
 import pytest
 
+import clipper.adapters.render as render_mod
 from clipper.adapters.media import MediaError
 from clipper.adapters.render import (
     CPU_RENDER_WARNING,
@@ -19,7 +22,14 @@ from clipper.adapters.render import (
     reset_render_adapter,
 )
 from clipper.config import Config
-from clipper.models import ClipAudioInfo, ClipPlan, Layout, MezzanineInfo, ProbeResult
+from clipper.models import (
+    ClipAudioInfo,
+    ClipPlan,
+    Layout,
+    MezzanineInfo,
+    ProbeResult,
+    RenderArtifact,
+)
 
 CFG = Config()
 
@@ -32,6 +42,10 @@ FILTERS_WITH_SCALE_CUDA = (
 FILTERS_WITHOUT_SCALE_CUDA = (
     " T. scale        V->V       Scale the size of the video\n"
     " ... ass         V->V       Render text subtitles on top of input\n"
+)
+FILTERS_NO_ASS = (  # M7c: an ffmpeg build WITHOUT the libass `ass` filter
+    " T. scale        V->V       Scale the size of the video\n"
+    " T. scale_cuda   V->V       GPU scaler\n"
 )
 
 
@@ -387,6 +401,186 @@ def test_fixture_audio_contract(tmp_path):
     assert (info.sample_rate, info.channels) == (48000, 2)
     assert info.duration_s == pytest.approx(10.0)
     assert info.schema_version == 1
+
+
+# -- M7c: final compose (ASS burn + loudnorm + NVENC) -----------------------
+
+def _touch(tmp_path: Path, name: str) -> str:
+    p = tmp_path / name
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text("placeholder")
+    return str(p)
+
+
+def _slice(cmd: list[str], token: str, n: int) -> list[str]:
+    idx = cmd.index(token)
+    return cmd[idx: idx + n]
+
+
+def test_compose_command_ass_loudnorm_nvenc_no_libx264(tmp_path):
+    cmd = FFmpegRenderAdapter().compose_command(
+        "mezz.mp4", "audio.m4a", "captions.ass", "final.mp4", CFG,
+    )
+    joined = " ".join(cmd)
+    assert "ass=captions.ass:fontsdir=" in joined
+    assert "loudnorm=I=-16:TP=-1.5:LRA=11" in joined
+    assert "h264_nvenc" in cmd
+    assert "libx264" not in cmd
+    # exact card shape: inputs, filters, NVENC final, AAC 160k, faststart
+    assert cmd[:4] == ["ffmpeg", "-hide_banner", "-loglevel", "error"]
+    assert ["-i", "mezz.mp4", "-i", "audio.m4a"] == cmd[5:9]
+    assert "-vf" in cmd and "-af" in cmd
+    assert "-c:v" in cmd and cmd[cmd.index("-c:v") + 1] == "h264_nvenc"
+    assert _slice(cmd, "-movflags", 2) == ["-movflags", "+faststart"]
+    assert _slice(cmd, "-c:a", 4) == ["-c:a", "aac", "-b:a", "160k"]
+    assert "-shortest" in cmd
+    assert cmd[-1] == "final.mp4"
+
+
+def test_compose_command_uses_cfg_final_cq_and_preset():
+    cfg = CFG.model_copy(deep=True)
+    cfg.render.nvenc_preset = "p6"
+    cfg.render.final_cq = 21
+    cmd = FFmpegRenderAdapter().compose_command(
+        "m", "a", "c.ass", "f", cfg,
+    )
+    i = cmd.index("h264_nvenc")
+    assert ["-preset", "p6", "-rc", "vbr", "-cq", "21"] == cmd[i + 1: i + 7]
+
+
+def test_compose_final_returns_partial_artifact(tmp_path, monkeypatch):
+    adapter = FFmpegRenderAdapter()
+    paths = {
+        "mezz": _touch(tmp_path, "clips/jobX-clip01/mezzanine.mp4"),
+        "audio": _touch(tmp_path, "clips/jobX-clip01/audio.m4a"),
+        "ass": _touch(tmp_path, "clips/jobX-clip01/captions.ass"),
+    }
+    dst = str(tmp_path / "clips" / "jobX-clip01" / "final.mp4")
+    install_fake(monkeypatch, FakeFFmpeg())
+    font_file = tmp_path / "fonts" / "Montserrat-ExtraBold.ttf"
+    font_file.parent.mkdir(parents=True, exist_ok=True)
+    font_file.write_bytes(b"fake ttf")
+    monkeypatch.setattr(
+        render_mod, "_caption_font_path", lambda: font_file,
+    )
+    monkeypatch.setattr(adapter._media, "probe", lambda p: probe_result())
+    art = adapter.compose_final(
+        paths["mezz"], paths["audio"], paths["ass"], dst, CFG,
+    )
+    assert isinstance(art, RenderArtifact)
+    assert art.schema_version == 1
+    # PARTIAL: the render stage (later M7) fills clip_id + thumbnail_path
+    assert art.clip_id == ""
+    assert art.thumbnail_path == ""
+    # probed geometry + fixed encoder/hwaccel
+    assert (art.width, art.height) == (1080, 1920)
+    assert art.fps == pytest.approx(30.0)
+    assert art.duration_s == pytest.approx(15.02)
+    assert art.encoder == "h264_nvenc"
+    assert art.hwaccel == "cuda"
+    assert art.render_seconds >= 0.0
+    assert art.final_path == Path(dst).resolve().as_posix()
+
+
+def test_compose_final_missing_font_raises_clean_error(monkeypatch, tmp_path):
+    adapter = FFmpegRenderAdapter()
+    missing_font = Path(tmp_path) / "Montserrat-ExtraBold.ttf"
+    monkeypatch.setattr(render_mod, "_caption_font_path", lambda: missing_font)
+    mezz = _touch(tmp_path, "m.mp4")
+    with pytest.raises(MediaError) as ei:
+        adapter.compose_final(mezz, mezz, mezz, str(tmp_path / "f.mp4"), CFG)
+    assert "install_fonts.sh" in str(ei.value)
+    assert "Montserrat-ExtraBold.ttf" in str(ei.value)
+
+
+def test_compose_final_missing_ass_filter_raises_clean_error(
+        tmp_path, monkeypatch,
+):
+    adapter = FFmpegRenderAdapter()
+    fake = FakeFFmpeg(filters_out=FILTERS_NO_ASS)
+    monkeypatch.setattr(subprocess, "run", fake)
+    present = _touch(tmp_path, "input.bin")
+    with pytest.raises(MediaError) as ei:
+        adapter.compose_final(
+            present, present, present, str(tmp_path / "f.mp4"), CFG,
+        )
+    assert "ass" in str(ei.value)
+    assert not any("-vf" in c for c in fake.calls)  # no encode was attempted
+
+
+def test_compose_final_missing_inputs_raise_clean_error(
+        tmp_path, monkeypatch,
+):
+    adapter = FFmpegRenderAdapter()
+    missing = str(tmp_path / "nope.mp4")
+    present = _touch(tmp_path, "yes.mp4")
+    for label, idx in (
+        ("mezzanine", 0), ("audio", 1), ("captions", 2),
+    ):
+        args = [present, present, present]
+        args[idx] = missing
+        with pytest.raises(MediaError) as ei:
+            adapter.compose_final(
+                *args, str(tmp_path / "f.mp4"), CFG,
+            )
+        assert label in str(ei.value)
+
+
+# -- M7c: thumbnail ---------------------------------------------------------
+
+def test_thumbnail_command_exact():
+    cmd = FFmpegRenderAdapter().thumbnail_command("final.mp4", "thumb.jpg")
+    assert cmd == [
+        "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
+        "-ss", "1.0",
+        "-i", "final.mp4",
+        "-vframes", "1",
+        "thumb.jpg",
+    ]
+
+
+def test_make_thumbnail_returns_dst(tmp_path, monkeypatch):
+    adapter = FFmpegRenderAdapter()
+    final = _touch(tmp_path, "final.mp4")
+    dst = str(tmp_path / "thumbnail.jpg")
+    fake = FakeFFmpeg()
+    install_fake(monkeypatch, fake)
+    out = adapter.make_thumbnail(final, dst)
+    assert out == Path(dst).resolve().as_posix()
+    assert len(fake.calls) == 1
+    assert fake.calls[0] == adapter.thumbnail_command(final, dst)
+
+
+def test_make_thumbnail_missing_final_raises_clean_error():
+    with pytest.raises(MediaError) as ei:
+        FFmpegRenderAdapter().make_thumbnail("/nonexistent/final.mp4", "/tmp/t.jpg")
+    assert "does not exist" in str(ei.value)
+
+
+# -- M7c: FixtureRenderAdapter partial artifact -----------------------------
+
+def test_fixture_compose_final_partial_artifact(tmp_path):
+    adapter = FixtureRenderAdapter()
+    dst = tmp_path / "jobX-clip01" / "final.mp4"
+    art = adapter.compose_final("m", "a", "c", str(dst), CFG)
+    assert dst.exists()  # placeholder written
+    assert isinstance(art, RenderArtifact)
+    assert art.schema_version == 1
+    assert art.clip_id == "" and art.thumbnail_path == ""  # stage fills these
+    assert (art.width, art.height) == (1080, 1920)
+    assert art.fps > 0 and art.duration_s > 0
+    assert art.encoder == "h264_nvenc"
+    assert art.hwaccel == "cuda"
+    assert art.render_seconds >= 0.0
+    assert art.final_path == str(dst.resolve())
+
+
+def test_fixture_make_thumbnail_placeholder(tmp_path):
+    adapter = FixtureRenderAdapter()
+    dst = str(tmp_path / "thumbnail.jpg")
+    out = adapter.make_thumbnail("/nonexistent/final.mp4", dst)
+    assert Path(dst).exists()
+    assert out == Path(dst).resolve().as_posix()
 
 
 # -- protocol conformance ---------------------------------------------------
