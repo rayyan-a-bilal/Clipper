@@ -156,6 +156,13 @@ class RenderConfig(BaseSettings):
     output_height: int = 1920
     crf: int = 14
     encoder: str = "h264_nvenc"
+    # M7a — NVENC quality/preset + hwaccel (docs/spec/m7.md decisions 1-5;
+    # backward compatible: all additive, existing keys untouched).
+    mezz_cq: int = 16
+    final_cq: int = 19
+    nvenc_preset: str = "p5"
+    hwaccel: str = "cuda"
+    cpu_render: bool = False
 
 class Config(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")

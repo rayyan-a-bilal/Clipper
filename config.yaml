@@ -94,3 +94,10 @@ render:
   output_height: 1920
   crf: 14
   encoder: h264_nvenc
+  # M7a (docs/spec/m7.md): NVENC quality/preset; GPU0 media only. CPU render
+  # is a debug path (explicit), never a fallback.
+  mezz_cq: 16
+  final_cq: 19
+  nvenc_preset: "p5"
+  hwaccel: cuda
+  cpu_render: false

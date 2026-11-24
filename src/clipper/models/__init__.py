@@ -141,6 +141,9 @@ from .analysis_artifacts import ShotsArtifact as ShotsArtifact  # noqa: E402
 from .analysis_artifacts import SilenceArtifact as SilenceArtifact  # noqa: E402
 from .analysis_artifacts import SilenceRegion as SilenceRegion  # noqa: E402
 from .candidate_artifacts import CandidatesArtifact as CandidatesArtifact  # noqa: E402
+from .render_artifacts import ClipAudioInfo as ClipAudioInfo  # noqa: E402
+from .render_artifacts import MezzanineInfo as MezzanineInfo  # noqa: E402
+from .render_artifacts import RenderArtifact as RenderArtifact  # noqa: E402
 from .scoring_artifacts import CandidateContext as CandidateContext  # noqa: E402
 from .scoring_artifacts import ScoresArtifact as ScoresArtifact  # noqa: E402
 from .scoring_artifacts import ScoringBatch as ScoringBatch  # noqa: E402
