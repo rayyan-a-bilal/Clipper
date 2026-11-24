@@ -20,7 +20,7 @@ The project root is **`/home/rbilal/clipper`**. (It is NOT `/home/clipper` — t
 - Docs root: `/home/rbilal/clipper/docs`
 - Milestone/spec docs: `/home/rbilal/clipper/docs/spec/*.md` (milestones.md, m2.md, m3.md, m4.md, m5.md, llm.md, contracts.md, scoring_prompt.md, m5c_status.md)
 - Source: `/home/rbilal/clipper/src/clipper` (contracts in `models/`, I/O in `adapters/`, stages in `stages/`)
-- Stage runners: `/home/rbilal/clipper/scripts/` (analyze_job.py, candidates_job.py, transcribe_job.py, score_job.py, select_job.py, llm_preflight.py)
+- Stage runners: `/home/rbilal/clipper/scripts/` (analyze_job.py, candidates_job.py, transcribe_job.py, score_job.py, select_job.py, layout_job.py, llm_preflight.py; `scripts/cuda_env.sh` must be sourced before `layout_job.py`)
 - Tests: `/home/rbilal/clipper/tests`
 - DB: `data/clipper.db` (SQLite WAL); job artifacts under `data/jobs/<job_id>/`
 - Venv: `/home/rbilal/clipper/.venv`
@@ -73,6 +73,7 @@ The project root is **`/home/rbilal/clipper`**. (It is NOT `/home/clipper` — t
 - scenedetect must be installed `pip install scenedetect --no-deps`; cv2 comes from `opencv-python-headless`. **`opencv-python` (non-headless) is FORBIDDEN** (libGL.so.1 failure). `pip check` false-positive for this pair is expected.
 - `adapters/scenes.py` does lazy `scenedetect`/`cv2` imports inside `detect_shots()` so imports stay light.
 - `data.json`/artifacts are written in canonical form `model_dump_json(indent=2)` + newline; golden fixtures (`tests/fixtures/m4/candidates.json`) must stay byte-identical.
+- **Always `source scripts/cuda_env.sh` before running `scripts/layout_job.py`** (the GPU/onnxruntime-gpu M6 layout job). The system has no CUDA toolkit/cuDNN (no sudo); `cuda_env.sh` points `LD_LIBRARY_PATH` at the user-local cuBLAS 13 + cuDNN 9 pip libs and pins `CUDA_VISIBLE_DEVICES` to GPU0 (2080 Super, cc 7.5 — the only GPU onnxruntime 1.32's CUDA EP supports). Without it the run fails to find cuBLAS/cuDNN. Correct form: `source scripts/cuda_env.sh && python scripts/layout_job.py <job_id>`.
 
 ## Acceptance commands — always in venv
 ```bash
@@ -109,6 +110,7 @@ Paste the outputs as proof. Do not claim done without them.
 - `scripts/score_job.py --mock` / `select_job.py --mock` are deterministic wiring tests only — never a real judgement.
 
 ## M6/M7 rules (forward, per docs/config)
+- **Running `scripts/layout_job.py` requires `source scripts/cuda_env.sh` first** (see Environment gotchas). Do not run the layout job for a real (non-mock) inference without it.
 - Production path uses GPU0 (2080 Super) for all video decode/encode; NVDEC decode, NVENC encode (mezzanine + final), GPU crop/scale/composite where supported. No libx264 production path; CPU fallback only behind an explicit debug flag.
 - Face detection via onnxruntime-gpu (YuNet/SCRFD-class) at 30fps minimum (native if lower). 3fps crop paths are forbidden. Use a 30fps vision proxy or source, not the M1 15fps proxy. `crop_path` at native video fps.
 - Must include benchmark proof: decode fps, inference fps, render fps, GPU utilization, NVENC session in nvidia-smi, render time per clip.

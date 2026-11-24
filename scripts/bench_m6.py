@@ -25,7 +25,13 @@ PI/coding agent STOPPED (it competes for VRAM; SKILL.md hardware rule).
 The P100s (Ollama LLM) are never involved.
 
 Usage:
-    python scripts/bench_m6.py <job-id>
+    source scripts/cuda_env.sh && python scripts/bench_m6.py <job-id>
+
+(The ``source`` is required: the system has no CUDA toolkit/cuDNN, so
+cuda_env.sh points LD_LIBRARY_PATH at the user-local cuBLAS 13 / cuDNN 9
+pip libs and pins CUDA_VISIBLE_DEVICES to GPU0. Without it onnxruntime
+warns "No registered plugin EP device found for 'CUDAExecutionProvider'"
+and silently falls back to CPU.)
 """
 
 import argparse
@@ -87,7 +93,7 @@ class GpuSampler:
             self.samples += 1
             self.peak_gpu = max(self.peak_gpu, gpu)
             self.peak_encoder = max(self.peak_encoder, enc)
-            self._stop.wait(self._SAMPLE_INTERVAL_S)
+            self._stop.wait(_SAMPLE_INTERVAL_S)
 
     def start(self) -> None:
         if not self.available:
