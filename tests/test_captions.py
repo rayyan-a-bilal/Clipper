@@ -38,9 +38,9 @@ def events(ass_text):
     """Parse dialogue events into dicts (start/end as floats)."""
     out = []
     for line in ass_text.splitlines():
-        if not line.startswith("dialogue:"):
+        if not line.startswith("Dialogue:"):
             continue
-        parts = line[len("dialogue:"):].strip().split(",", 9)
+        parts = line[len("Dialogue:"):].strip().split(",", 9)
         out.append({
             "start": captions._parse_time(parts[1]),
             "end": captions._parse_time(parts[2]),
@@ -85,6 +85,17 @@ def test_valid_ass_header_and_caption_style():
     assert s["margin_l"] == "150"
     assert s["margin_r"] == "150"
     assert s["margin_v"] == "450"
+
+
+def test_event_lines_use_spec_conformant_dialogue_tag():
+    # M7g regression: libass silently DROPS any event line not spelled
+    # exactly `Dialogue:` (this was the reason real renders had zero
+    # visible subtitles while captions.ass looked full of events).
+    words = [W(10.5, 11.0, "hello"), W(12.0, 13.0, "world")]
+    out = captions.words_to_ass(words, make_plan(), cfg_default())
+    lines = out.splitlines()
+    assert sum(1 for line in lines if line.startswith("Dialogue:")) >= 2
+    assert not any(line.startswith("dialogue") for line in lines)
 
 
 def test_hook_style_top_and_safe_zone():

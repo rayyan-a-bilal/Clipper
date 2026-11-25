@@ -176,7 +176,7 @@ def words_to_ass(words: list, plan, cfg) -> str:
         hook_end = min(cfg.clips.hook_overlay_duration, max(0.0, duration))
         if hook_end > 0.0:
             events.append(
-                f"dialogue: 0,{_fmt_time(0.0)},{_fmt_time(hook_end)},"
+                f"Dialogue: 0,{_fmt_time(0.0)},{_fmt_time(hook_end)},"
                 f"Hook,,0,0,0,,{hook_text}"
             )
 
@@ -189,7 +189,7 @@ def words_to_ass(words: list, plan, cfg) -> str:
         end = max(end, start + MIN_DISPLAY_S)
         text = _group_text(group)
         events.append(
-            f"dialogue: 0,{_fmt_time(start)},{_fmt_time(end)},"
+            f"Dialogue: 0,{_fmt_time(start)},{_fmt_time(end)},"
             f"Caption,,0,0,0,,{text}"
         )
 

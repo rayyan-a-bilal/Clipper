@@ -49,10 +49,34 @@ The project root is **`/home/rbilal/clipper`**. (It is NOT `/home/clipper` — t
 - M6: GPU face analysis, layout decision, crop path (fills `layout`/`crop_path` in draft ClipPlans)
 - M7: GPU render (NVDEC/NVENC), captions, hook overlay
 - M8: worker orchestration (one job at a time in v1)
-- M9: QC web UI (FastAPI/Jinja2/HTMX per config/docs)
+- M9: QC **dashboard** hosted on the Linux server (FastAPI/Jinja2/HTMX per config/docs) — the user operates the pipeline from a browser: toggles for face tracking, captions on/off, placement/margins, thresholds, explicit layout choice.
 - M10: posting outbox
 
-**Stale-map warning:** the old "Future Milestones" block in `AGENTS.md` (M6=quality gate, M7=cut refinement, M8=reframe, M9=captions, M10=QC+outbox) is a SUPERSEDED plan — selection/cut refinement was absorbed into M5c. `docs/spec/milestones.md` mixes old and new entries; trust the milestone specs + the task card over any conflicting list. `config.yaml` has forward `faces:`, `captions:`, `render:` blocks (1080x1920, crf 14, `h264_nvenc`).
+## Project direction & design paradigms (added 2026-11-25 — bind all future decisions to these)
+
+The user reviewed real clips (job `7d187d98…`, TED-stage footage `test_media/ted/ted_x.mp4`) and set the direction:
+
+1. **General content, not just one source.** Clips come from TED talks, shows/episodes, any horizontal-to-vertical reframing content. Face tracking must behave on low-confidence small faces too (e.g. YuNet top prob ~0.5 on stage footage never clears the old 0.6 bar).
+2. **Face-stabilized zoom.** Even "zoom" (center_crop) clips should subtly follow the face so the person stays in frame; tracking is a continuous refinement, not either/or (full face_track vs static center_crop).
+3. **Dashboard-first design.** M9 is a server-hosted dashboard controlling these knobs. Therefore EVERY user-facing behavior knob must be:
+   - a **config default** (`cfg.`, read through `config.py`), and
+   - overridable **per job / per clip** (precedent: `forced_layout` / `layout_source="manual"` in the M6e layout stage), and
+   - plumbable as a pure function argument so the UI/stage API can pass overrides without new code paths.
+   Do NOT hardcode behavior constants into stages/adapters. Tests stay CPU-only via fixtures.
+4. **Spec-before-code.** Behavior/constant changes to completed milestones (M6d pan law, M7a caption format, thresholds) require a dated decision entry in the relevant `docs/spec/m#.md` (new decision number, old values recorded) BEFORE the code change; mirror contract changes in `docs/spec/contracts.md`; update `AGENTS.md` + `milestones.md`.
+5. **Diagnosis evidence.** When a stage "fell back" or "found 0 faces", check the artifact metadata first (`layout.json`: `layout`, `face_track_count`, `layout_source`), then probe the raw detector scores on the actual frames (CPU ORT or `Cv2CpuFaceDetector` debug path) before touching thresholds. Note: `cv2.FaceDetectorYN` returns a `cv2.Mat`, NOT a `numpy.ndarray` — `isinstance(r, np.ndarray)` is the wrong emptiness check (returned -1 int = no faces).
+6. **Known-good facts (2026-11-25):** YuNet model `data/models/yunet.onnx` is byte-identical to official OpenCV Zoo (md5 `4ae92eeb150c82ce15ac80738b3b8167`). ffmpeg here is 4.4.2: `scale_cuda` has NO `format` AVOption — do not add `:format=nv12` back. ASS events MUST start with uppercase `Dialogue:` (libass silently drops `dialogue:` lines — this was the M7 caption bug).
+
+## Session pattern for behavior changes (use for any new knob/fix)
+1. Startup ritual (below) → `git status` → named branch.
+2. If touching a completed milestone's contract/constants: spec decision entry FIRST, record old values.
+3. Pure-logic changes (`layouts.py`, `captions.py`, `tracking.py`) stay I/O-free and fixture-tested.
+4. New user-facing knobs: `config.py` default + `config.yaml` entry + (when per-clip relevant) the override parameter threaded through the stage's public function (existing pattern: `forced_layout`, `frame_reader`, `clip_id`).
+5. Acceptance commands pass (venv, paste outputs), ruff clean, AGENTS.md + milestones.md updated, committed on the branch. STOP at the milestone boundary.
+
+**Stale-map warning:** the old "Future Milestones" block in `AGENTS.md` (M6=quality gate, M7=cut refinement, M8=reframe, M9=captions, M10=QC+outbox) is a SUPERSEDED plan — selection/cut refinement was absorbed into M5c, and M9 is a DASHBOARD (see direction rules above), not "QC+outbox". `docs/spec/milestones.md` mixes old and new entries; trust the milestone specs + the task card over any conflicting list. `config.yaml` has `faces:`, `captions:`, `render:` blocks (1080x1920, crf 14, `h264_nvenc`).
+
+**Status at 2026-11-25:** M0–M5c, M6 (a–e), M7a–M7f DONE (first real GPU render + bench proof exist). Open work agreed with the user: (a) caption `Dialogue:` case fix [M7 bug fix], (b) face-stabilized center crop (follow mode — M6 spec delta), (c) dashboard/config surface groundwork (per-clip `options.json` + CLI flags).
 
 ## Hardware
 - GPU0: RTX 2080 Super — media only (Whisper ASR, NVDEC/NVENC, M6/M7 video work)
@@ -109,7 +133,7 @@ Paste the outputs as proof. Do not claim done without them.
 - Scoring prompt is `prompts.py::SCORING_SYSTEM` (canonical) mirrored verbatim in `docs/spec/scoring_prompt.md` — change both together only per spec decision.
 - `scripts/score_job.py --mock` / `select_job.py --mock` are deterministic wiring tests only — never a real judgement.
 
-## M6/M7 rules (forward, per docs/config)
+## M6/M7 rules (complete — changes need spec decisions; see Session pattern above)
 - **Running `scripts/layout_job.py` requires `source scripts/cuda_env.sh` first** (see Environment gotchas). Do not run the layout job for a real (non-mock) inference without it.
 - Production path uses GPU0 (2080 Super) for all video decode/encode; NVDEC decode, NVENC encode (mezzanine + final), GPU crop/scale/composite where supported. No libx264 production path; CPU fallback only behind an explicit debug flag.
 - Face detection via onnxruntime-gpu (YuNet/SCRFD-class) at 30fps minimum (native if lower). 3fps crop paths are forbidden. Use a 30fps vision proxy or source, not the M1 15fps proxy. `crop_path` at native video fps.
