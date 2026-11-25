@@ -135,6 +135,13 @@ class FacesConfig(BaseSettings):
     nms_threshold: float = 0.3
     top_k: int = 5000
     det_size: int = 640
+    # M6f — face_follow (face-stabilized zoom crop; docs/spec/m6.md):
+    # enabled = the `face_follow` layout is auto-selectable (dashboard /
+    # CLI can still force any layout via `--layout`); follow_persistence_min
+    # = the dominant track's persistence bar BELOW which face_track does
+    # not apply but face_follow does (default 0.3).
+    face_follow_enabled: bool = True
+    follow_persistence_min: float = 0.3
 
 class CaptionsConfig(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="CLIPPER_")

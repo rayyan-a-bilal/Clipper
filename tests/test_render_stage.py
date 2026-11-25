@@ -210,12 +210,16 @@ def _setup(
     return cfg
 
 
-def _setup_face_track(tmp_path) -> tuple[Config, ClipPlan]:
-    """One face_track clip: M6e-style layout.json + a ClipPlan whose
-    `crop_path` holds the main-track keys (t=0 first, M6e rule)."""
+def _setup_face_track(
+    tmp_path,
+    layout: Layout = Layout.face_track,
+) -> tuple[Config, ClipPlan]:
+    """One dynamic-crop clip (face_track M7e / face_follow M6f): M6e-style
+    layout.json + a ClipPlan whose `crop_path` holds the main-track keys
+    (t=0 first, M6e rule)."""
     clip_id = f"{JOB_ID}-clip01"
     plan = _plan(clip_id, START, END)
-    plan.layout = Layout.face_track
+    plan.layout = layout
     keys = [
         CropKey(t=i / 30.0, x=(1920 - 608) // 2 + i, y=0, w=608, h=1080)
         for i in range(25)
@@ -224,7 +228,7 @@ def _setup_face_track(tmp_path) -> tuple[Config, ClipPlan]:
     cfg = _setup(tmp_path, plans=[plan], with_layouts=False)
     clip_dir = _job_dir(cfg) / "clips" / clip_id
     clip_dir.mkdir(parents=True, exist_ok=True)
-    artifact = _layout_artifact(clip_id, layout="face_track",
+    artifact = _layout_artifact(clip_id, layout=layout.value,
                                 face_track_count=1)
     (clip_dir / "layout.json").write_text(
         json.dumps(artifact, indent=2) + "\n", encoding="utf-8",
@@ -518,18 +522,19 @@ def test_no_warning_without_cpu_render(tmp_path, caplog):
     ]
 
 
-def test_face_track_layout_renders_cleanly(tmp_path):
-    """M7e: the dynamic face_track path renders end-to-end (stage level)
-    on the CPU-only fixture adapter: crop.cmd lands BESIDE the mezzanine,
-    all six outputs exist, status updated."""
-    cfg, plan = _setup_face_track(tmp_path)
+@pytest.mark.parametrize("layout", [Layout.face_track, Layout.face_follow])
+def test_dynamic_crop_layout_renders_cleanly(tmp_path, layout):
+    """M7e/M6f: the dynamic face_track / face_follow path renders
+    end-to-end (stage level) on the CPU-only fixture adapter: crop.cmd
+    lands BESIDE the mezzanine, all six outputs exist, status updated."""
+    cfg, plan = _setup_face_track(tmp_path, layout=layout)
     render = _RecordingRender()
     summary = _run(cfg, render)
     cid = f"{JOB_ID}-clip01"
 
     assert summary["skipped"] is False
     rec = summary["clips"][0]
-    assert rec["layout"] == "face_track"
+    assert rec["layout"] == layout.value
     assert rec["face_track_count"] == 1
 
     clip_dir = _job_dir(cfg) / "clips" / cid
@@ -553,7 +558,7 @@ def test_face_track_layout_renders_cleanly(tmp_path):
 
     row = _clip_row(cfg, cid)
     assert row["status"] == "rendered"
-    assert row["plan"]["layout"] == "face_track"
+    assert row["plan"]["layout"] == layout.value
     assert [k["t"] for k in row["plan"]["crop_path"]][0] == 0.0
     stage_state, job_state = _stage_and_job_state(cfg)
     assert stage_state == "done"

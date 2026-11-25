@@ -52,7 +52,7 @@ CPU_FACES_WARNING = (
     "ONLY; production is YuNet ONNX on GPU0 (docs/spec/m6.md, decision "
     "9)."
 )
-LAYOUT_CHOICES = ["center_crop", "face_track", "split_screen", "facecam"]
+LAYOUT_CHOICES = ["center_crop", "face_track", "face_follow", "split_screen", "facecam"]
 
 
 def _print_clips(summary: dict) -> None:
@@ -97,6 +97,18 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="CPU face detector (cv2) — debug path only, LOUD warning",
     )
+    parser.add_argument(
+        "--score-threshold",
+        type=float,
+        default=None,
+        help=(
+            "Per-run YuNet/M6b face score threshold override (default: "
+            "config faces.score_threshold, 0.6). Lower for low-confidence "
+            "content (e.g. TED-stage faces around 0.5): face_follow (M6f) "
+            "can only fire if the face is detected at all. Dashboard knob "
+            "precursor (docs/spec/m6.md M6f)."
+        ),
+    )
     args = parser.parse_args(argv)
 
     logging.basicConfig(
@@ -107,6 +119,14 @@ def main(argv: list[str] | None = None) -> int:
         print(CPU_FACES_WARNING)
 
     cfg = Config()
+    if args.score_threshold is not None:
+        cfg.faces = cfg.faces.model_copy(
+            update={"score_threshold": float(args.score_threshold)}
+        )
+        print(
+            f"score-threshold override: {args.score_threshold} "
+            "(default 0.6)"
+        )
     forced_layout = Layout(args.layout) if args.layout else None
     vision = get_vision_adapter(cfg)
     detector = get_face_detector(cfg, cpu=args.cpu_faces)

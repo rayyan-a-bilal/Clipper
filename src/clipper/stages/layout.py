@@ -271,7 +271,13 @@ def _process_clip(
     if forced_layout is not None:
         layout = forced_layout
     else:
-        layout = decide_layout(summary, probe.width, probe.height)
+        layout = decide_layout(
+            summary,
+            probe.width,
+            probe.height,
+            face_follow_enabled=bool(cfg.faces.face_follow_enabled),
+            follow_persistence_min=float(cfg.faces.follow_persistence_min),
+        )
 
     region_tracks = build_tracks(
         layout,

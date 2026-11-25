@@ -360,6 +360,50 @@ def test_mezzanine_command_rejects_face_track_without_crop_path():
         adapter.mezzanine_command(
             "s", make_face_plan(n_keys=0),
             Layout.face_track, "d", CFG, native_fps=30.0, gpu_scale=True)
+    # M6f: face_follow shares the same requirement
+    with pytest.raises(MediaError, match=r"crop_path"):
+        adapter.mezzanine_command(
+            "s", make_face_plan(n_keys=0),
+            Layout.face_follow, "d", CFG, native_fps=30.0, gpu_scale=True)
+
+
+# M6f: face_follow renders via the same M7e dynamic sendcmd crop path
+
+def test_face_follow_command_sendcmd_crop_nvenc_no_libx264():
+    adapter = FFmpegRenderAdapter()
+    plan = make_face_plan()
+    cmd = adapter.mezzanine_command(
+        "src.mp4", plan, Layout.face_follow, "out/clip/mezzanine.mp4",
+        CFG, native_fps=30.0, gpu_scale=True)
+    assert cmd[0] == "ffmpeg"
+    assert "h264_nvenc" in cmd
+    assert "libx264" not in cmd
+    assert cmd.index("-i") < cmd.index("-vf")
+    vf = cmd[cmd.index("-vf") + 1]
+    assert vf.startswith("sendcmd=f=")
+    crop_cmd_path = (
+        Path("out/clip/mezzanine.mp4").resolve().parent / CROP_CMD_FILENAME)
+    assert f"sendcmd=f={crop_cmd_path}," in vf
+    first = plan.crop_path[0]
+    assert f"crop=w={first.w}:h={first.h}:x={first.x}:y={first.y}" in vf
+    assert "hwupload_cuda,scale_cuda=1080:1920" in vf
+    assert vf.index("sendcmd") < vf.index("crop=")
+    # Same shape as the face_track command (geometry-identical path)
+    cmd_track = adapter.mezzanine_command(
+        "src.mp4", plan, Layout.face_track, "out/clip/mezzanine.mp4",
+        CFG, native_fps=30.0, gpu_scale=True)
+    assert cmd == cmd_track
+
+
+def test_face_follow_cpu_render_uses_libx264_not_nvenc():
+    adapter = FFmpegRenderAdapter(cpu_render=True)
+    plan = make_face_plan()
+    cmd = adapter.mezzanine_command(
+        "src.mp4", plan, Layout.face_follow, "out/m.mp4",
+        CFG, native_fps=30.0, gpu_scale=False)
+    assert "libx264" in cmd and "h264_nvenc" not in cmd
+    vf = cmd[cmd.index("-vf") + 1]
+    assert vf.startswith("sendcmd=f=") and "crop=" in vf
 
 
 def test_mezzanine_command_rejects_nonpositive_native_fps():
@@ -824,6 +868,32 @@ def test_fixture_face_track_rejects_empty_crop_path(tmp_path):
     empty = make_face_plan(n_keys=0)
     with pytest.raises(MediaError, match="crop_path"):
         adapter.render_mezzanine("s", empty, Layout.face_track,
+                                 str(tmp_path / "m9.mp4"), CFG)
+    assert not (tmp_path / "m9.mp4").exists()
+
+
+# M6f: the fixture adapter accepts face_follow on the same dynamic path
+
+def test_fixture_face_follow_writes_crop_cmd_beside(tmp_path):
+    adapter = FixtureRenderAdapter()
+    clip_dir = tmp_path / "clips" / "jobX-clip01"
+    dst = clip_dir / "mezzanine.mp4"
+    plan = make_face_plan()
+    info = adapter.render_mezzanine("s", plan, Layout.face_follow,
+                                    str(dst), CFG, native_fps=30.0)
+    assert dst.exists()
+    assert isinstance(info, MezzanineInfo)
+    crop_cmd_file = clip_dir / CROP_CMD_FILENAME
+    assert crop_cmd_file.is_file()
+    assert crop_cmd_file.read_text(
+        encoding="utf-8") == crop_cmd_from_path(plan.crop_path, 30.0)
+
+
+def test_fixture_face_follow_rejects_empty_crop_path(tmp_path):
+    adapter = FixtureRenderAdapter()
+    empty = make_face_plan(n_keys=0)
+    with pytest.raises(MediaError, match="crop_path"):
+        adapter.render_mezzanine("s", empty, Layout.face_follow,
                                  str(tmp_path / "m9.mp4"), CFG)
     assert not (tmp_path / "m9.mp4").exists()
 

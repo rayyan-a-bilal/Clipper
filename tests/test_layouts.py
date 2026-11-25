@@ -25,12 +25,14 @@ def summary(
     persistent: list[int] | None = None,
     facecam: list[int] | None = None,
     pair: tuple[int, int] | None = None,
+    dom_p: float = 0.0,
 ) -> TrackSummary:
     return TrackSummary(
         dominant_track_id=dominant,
         persistent_track_ids=persistent or [],
         facecam_candidate_track_ids=facecam or [],
         side_by_side_pair=pair,
+        dominant_persistence=dom_p,
     )
 
 
@@ -92,9 +94,168 @@ def test_face_track_when_one_persistent_track():
 
 def test_dominant_but_not_persistent_is_center_crop():
     # dominant exists but its persistence is below the 0.6 threshold
+    # AND below the M6f follow bar (dom_p defaults to 0.0)
     assert (
         decide_layout(summary(dominant=0, persistent=[]), SW, SH) is Layout.center_crop
     )
+
+
+# --------------------------------------------------------------- face_follow
+
+def test_face_follow_selected_when_dominant_at_bar():
+    # below the 0.6 face_track bar, at the 0.3 follow bar -> face_follow
+    assert (
+        decide_layout(
+            summary(dominant=0, persistent=[], dom_p=0.3), SW, SH
+        )
+        is Layout.face_follow
+    )
+
+
+def test_face_follow_rejected_below_bar():
+    # dominant 0.29... below 0.3 -> center_crop (NO FACE IS NEAR NORMAL,
+    # but below-bar is center_crop)
+    assert (
+        decide_layout(
+            summary(dominant=0, persistent=[], dom_p=0.29), SW, SH
+        )
+        is Layout.center_crop
+    )
+    assert (
+        decide_layout(
+            summary(dominant=0, persistent=[], dom_p=0.0), SW, SH
+        )
+        is Layout.center_crop
+    )
+
+
+def test_face_follow_can_be_disabled():
+    s = summary(dominant=0, persistent=[], dom_p=0.9)
+    assert (
+        decide_layout(s, SW, SH, face_follow_enabled=False) is Layout.center_crop
+    )
+
+
+def test_face_follow_bar_is_overridable():
+    s = summary(dominant=0, persistent=[], dom_p=0.2)
+    assert decide_layout(s, SW, SH) is Layout.center_crop  # default 0.3
+    assert (
+        decide_layout(s, SW, SH, follow_persistence_min=0.2) is Layout.face_follow
+    )
+
+
+def test_face_track_precedence_over_face_follow():
+    # both bars met: face_track wins (M6d behavior unchanged)
+    s = summary(dominant=0, persistent=[0], dom_p=0.9)
+    assert decide_layout(s, SW, SH) is Layout.face_track
+    # facecam/split_screen still above face_follow
+    assert (
+        decide_layout(
+            summary(dominant=0, persistent=[], facecam=[0], dom_p=0.9), SW, SH
+        )
+        is Layout.facecam
+    )
+    assert (
+        decide_layout(
+            summary(dominant=0, persistent=[0, 1], pair=(0, 1), dom_p=0.9),
+            SW, SH,
+        )
+        is Layout.split_screen
+    )
+
+
+def test_face_follow_window_geometry_same_as_face_track():
+    s = summary(dominant=0, dom_p=0.5)
+    tracks = build_tracks(
+        Layout.face_follow, s, SW, SH, FPS, DUR, [],
+        [moving_face([0.3, 0.5, 0.7])],
+    )
+    k = tracks[0].keys[0]
+    w, h = track_window_wh()
+    assert k.h == SH, "window h = source_h (same as face_track)"
+    assert k.w == w == int(round(SH * ASPECT)), "window w = round(h * 9/16)"
+    assert k.y == 0
+
+
+def test_face_follow_moving_face_moves_and_stays_in_bounds():
+    s = summary(dominant=0, dom_p=0.5)
+    tracks = build_tracks(
+        Layout.face_follow, s, SW, SH, FPS, DUR, [],
+        [moving_face([0.3, 0.4, 0.5, 0.6, 0.7], ts=[0.0, 0.2, 0.4, 0.6, 0.8])],
+    )
+    xs = [k["x"] for k in keys_of(tracks)]
+    assert max(xs) - min(xs) > 0, "path moves"
+    hi = SW - int(round(SH * ASPECT))
+    assert min(xs) >= 0 and max(xs) <= hi
+    assert_common_invariants(tracks)
+    assert_deterministic(
+        lambda: build_tracks(
+            Layout.face_follow, s, SW, SH, FPS, DUR, [],
+            [moving_face([0.3, 0.4, 0.5, 0.6, 0.7], ts=[0.0, 0.2, 0.4, 0.6, 0.8])],
+        )
+    )
+
+
+def test_face_follow_is_more_responsive_than_face_track():
+    # M6f pan law: tau 0.5 (< 0.8), dead-zone 0.10 (< 0.20), clamp 0.40
+    # (> 0.30) — a hard step to a far target converges FASTER (subtle =
+    # follows sooner, never lags the face out of the window).
+    dt = 1 / 30.0
+    boxes = [box(0.0, 0.16)] + [box(i * dt, 0.84) for i in range(1, 46)]
+    tr = track(0, boxes)
+
+    def run(layout):
+        s = summary(
+            dominant=0,
+            persistent=[0] if layout is Layout.face_track else [],
+            dom_p=0.9,
+        )
+        return [k["x"] for k in keys_of(
+            build_tracks(layout, s, SW, SH, FPS, DUR, [], [tr])
+        )]
+
+    track_xs = run(Layout.face_track)
+    follow_xs = run(Layout.face_follow)
+    assert follow_xs[-1] > track_xs[-1], (
+        "face_follow (FOLLOW_* constants) must converge closer to the "
+        "target than face_track for the same input"
+    )
+
+
+def test_face_follow_faceless_degrades_to_static_centered_window():
+    # M6f judgment note J1: NO face at all (or a dominant id without
+    # tracks, e.g. forced layout on a faceless clip) -> STATIC centered
+    # full-height window, layout value preserved, NEVER raises.
+    w = int(round(SH * ASPECT))
+    expected_x = (SW - w) // 2
+    for s, tracks_in in [
+        (summary(), []),                                  # fully faceless
+        (summary(dominant=0, dom_p=0.9), []),             # id but no tracks
+    ]:
+        tracks = build_tracks(
+            Layout.face_follow, s, SW, SH, FPS, DUR, [], tracks_in
+        )
+        assert [t_.role for t_ in tracks] == ["main"]
+        k = tracks[0].keys[0]
+        assert (k.x, k.y, k.w, k.h) == (expected_x, 0, w, SH)
+        assert len({kk["x"] for kk in keys_of(tracks)}) == 1, "static"
+        assert_common_invariants(tracks)
+
+
+def test_face_track_init_value_unchanged_by_refactor():
+    # Pinned regression for the shared follower helper (M6f refactor):
+    # first detection at cx=0.3 -> target x = 0.3*1920 - 608/2 = 272,
+    # hard-initialized for BOTH laws (identical input, identical start).
+    w = int(round(SH * ASPECT))
+    expected_x = round(0.3 * SW) - w // 2  # 272
+    tr = moving_face([0.3, 0.5, 0.7])
+    for layout in (Layout.face_track, Layout.face_follow):
+        s = summary(
+            dominant=0, dom_p=1.0,
+            persistent=[0] if layout is Layout.face_track else [],
+        )
+        k = build_tracks(layout, s, SW, SH, FPS, DUR, [], [tr])[0].keys[0]
+        assert k.x == expected_x, f"{layout.value}: init x must stay {expected_x}"
 
 
 # ------------------------------------------------------------- common invariants

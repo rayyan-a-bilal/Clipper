@@ -231,6 +231,7 @@ def summarize(
             persistent_track_ids=[],
             facecam_candidate_track_ids=[],
             side_by_side_pair=None,
+            dominant_persistence=0.0,
         )
 
     stats: list[tuple[int, dict]] = [
@@ -295,9 +296,17 @@ def summarize(
                     best_key = key
                     side_by_side = (tid_a, tid_b)
 
+    # M6f: record the dominant track's persistence for decide_layout
+    dominant_persistence = 0.0
+    for tid, s in stats:
+        if tid == dominant_tid:
+            dominant_persistence = s["persistence"]
+            break
+
     return TrackSummary(
         dominant_track_id=dominant_tid,
         persistent_track_ids=persistent,
         facecam_candidate_track_ids=facecam,
         side_by_side_pair=side_by_side,
+        dominant_persistence=dominant_persistence,
     )

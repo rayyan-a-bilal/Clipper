@@ -25,6 +25,11 @@ from clipper.models import CropKey, FaceTrack, Layout, RegionTrack, TrackSummary
 EMA_TAU_S = 0.8               # EMA time constant for face_track panning
 DEAD_ZONE = 0.20              # no motion while centroid within central 20% of window
 MAX_PAN_FRAC_PER_S = 0.30     # velocity clamp, fraction of window width per second
+# --- Module constants (M6f) — face_follow: MORE RESPONSIVE "subtle" pan law
+FOLLOW_EMA_TAU_S = 0.5
+FOLLOW_DEAD_ZONE = 0.10
+FOLLOW_MAX_PAN_FRAC_PER_S = 0.40
+DEFAULT_FOLLOW_PERSISTENCE_MIN = 0.30  # config default (faces.follow_persistence_min)
 ASPECT = 9 / 16               # output aspect (exact in binary floating point)
 FACECAM_ENLARGE = 4.0         # facecam square side = max(mean face w, h) * this
 
@@ -33,11 +38,17 @@ def decide_layout(
     summary: TrackSummary,
     source_w: int,  # noqa: ARG001 — geometry is irrelevant to the decision
     source_h: int,  # noqa: ARG001 — kept on the card's signature
+    face_follow_enabled: bool = True,
+    follow_persistence_min: float = DEFAULT_FOLLOW_PERSISTENCE_MIN,
 ) -> Layout:
     """Decide the layout from the per-clip track summary.
 
-    Precedence: facecam > split_screen > face_track > center_crop.
-    A faceless clip (empty summary) is a NORMAL state -> center_crop.
+    Precedence (M6f): facecam > split_screen > face_track > face_follow
+    > center_crop. face_track requires a PERSISTENT track (M6c bar 0.6);
+    face_follow requires `face_follow_enabled` AND the dominant track's
+    persistence >= `follow_persistence_min` (default 0.30, config knob
+    `faces.follow_persistence_min`). A faceless clip (empty summary) is a
+    NORMAL state -> center_crop.
     """
     if summary.facecam_candidate_track_ids:
         return Layout.facecam
@@ -45,6 +56,12 @@ def decide_layout(
         return Layout.split_screen
     if summary.persistent_track_ids:
         return Layout.face_track
+    if (
+        face_follow_enabled
+        and summary.dominant_track_id is not None
+        and summary.dominant_persistence >= follow_persistence_min
+    ):
+        return Layout.face_follow
     return Layout.center_crop
 
 
@@ -157,19 +174,23 @@ def _build_face_track(
     native_fps: float,
     duration_s: float,
     shot_boundaries: list[float],
+    ema_tau_s: float = EMA_TAU_S,
+    dead_zone: float = DEAD_ZONE,
+    max_pan_frac_per_s: float = MAX_PAN_FRAC_PER_S,
 ) -> RegionTrack:
     """Single full-height 9:16 window following the dominant face centroid.
 
     x follows the per-detection target (window centered on the centroid,
     clamped to [0, source_w - w]) with:
-      - EMA smoothing: alpha = 1 - exp(-dt / EMA_TAU_S)
+      - EMA smoothing: alpha = 1 - exp(-dt / ema_tau_s)
       - dead zone: no motion while the centroid is within the central
-        DEAD_ZONE fraction of the crop window
-      - velocity clamp: |dx| <= MAX_PAN_FRAC_PER_S * w * dt
+        `dead_zone` fraction of the crop window
+      - velocity clamp: |dx| <= max_pan_frac_per_s * w * dt
       - hard reset at shot boundaries (jump straight to the new target,
         no smoothing)
     Output keys: linear interpolation between computed positions on the
-    native-fps grid.
+    native-fps grid. Defaults are the M6d face_track law; M6f face_follow
+    passes the FOLLOW_* (more responsive) constants.
     """
     w, h = _track_window(source_w, source_h)
     lo, hi = 0, source_w - w
@@ -200,10 +221,10 @@ def _build_face_track(
                 events.append((b, state))
         else:
             dt = t - (prev_t or 0.0)
-            if dt > 0 and abs(cx - (state + w / 2.0)) > DEAD_ZONE * w / 2.0:
-                alpha = 1.0 - math.exp(-dt / EMA_TAU_S)
+            if dt > 0 and abs(cx - (state + w / 2.0)) > dead_zone * w / 2.0:
+                alpha = 1.0 - math.exp(-dt / ema_tau_s)
                 step = alpha * (target - state)
-                max_step = MAX_PAN_FRAC_PER_S * w * dt
+                max_step = max_pan_frac_per_s * w * dt
                 if step > max_step:
                     step = max_step
                 elif step < -max_step:
@@ -226,6 +247,21 @@ def _build_face_track(
         x = int(round(_clamp(v, float(lo), float(hi))))
         keys.append(CropKey(t=t, x=x, y=0, w=w, h=h))
     return RegionTrack(role="main", keys=keys)
+
+
+def _static_follow_window(
+    source_w: int,
+    source_h: int,
+    native_fps: float,
+    duration_s: float,
+) -> RegionTrack:
+    """M6f faceless fallback (judgment note M6f-J1): a STATIC centered
+    full-height 9:16 window (same geometry as the face_track window, x
+    centered) so a forced `face_follow` layout on a faceless clip still
+    yields a valid crop path."""
+    w, h = _track_window(source_w, source_h)
+    x = (source_w - w) // 2
+    return _static_track("main", x, 0, w, h, native_fps, duration_s)
 
 
 def _build_split_screen(
@@ -318,6 +354,27 @@ def build_tracks(
         return [_build_face_track(
             _find_track(tracks, tid, Layout.face_track),
             source_w, source_h, native_fps, duration_s, shot_boundaries,
+        )]
+    if layout == Layout.face_follow:
+        # M6f: same full-height window as face_track but the MORE
+        # RESPONSIVE FOLLOW_* pan law; faceless (judgment note M6f-J1)
+        # degrades to a STATIC centered full-height window — never raises.
+        tid = summary.dominant_track_id
+        track = None
+        if tid is not None:
+            for tr in tracks:
+                if tr.track_id == tid and tr.boxes:
+                    track = tr
+                    break
+        if track is None:
+            return [_static_follow_window(
+                source_w, source_h, native_fps, duration_s)]
+        return [_build_face_track(
+            track, source_w, source_h, native_fps, duration_s,
+            shot_boundaries,
+            ema_tau_s=FOLLOW_EMA_TAU_S,
+            dead_zone=FOLLOW_DEAD_ZONE,
+            max_pan_frac_per_s=FOLLOW_MAX_PAN_FRAC_PER_S,
         )]
     if layout == Layout.split_screen:
         return _build_split_screen(

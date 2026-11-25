@@ -77,6 +77,14 @@ faces:
   nms_threshold: 0.3
   top_k: 5000
   det_size: 640
+  # M6f — face_follow (face-stabilized zoom crop; docs/spec/m6.md M6f):
+  # auto-selectable when the dominant face is below the 0.6 face_track
+  # bar but at/above follow_persistence_min; pan law FOLLOW_* constants
+  # live in src/clipper/layouts.py (M6f spec table). Both knobs are
+  # dashboard-first: overridable, and `--layout face_follow` / `center_crop`
+  # force per job.
+  face_follow_enabled: true
+  follow_persistence_min: 0.3
 
 captions:
   font: Montserrat ExtraBold

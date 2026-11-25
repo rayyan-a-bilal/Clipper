@@ -36,15 +36,19 @@ class TrackSummary(BaseModel):
 
     Not a persisted artifact (no `schema_version`); computed in memory
     by `clipper.tracking.summarize` from the per-clip face tracks.
+    `dominant_persistence` (M6f) is the dominant track's persistence
+    (0.0 for the empty case).
     """
     dominant_track_id: int | None
     persistent_track_ids: list[int]
     facecam_candidate_track_ids: list[int]
     side_by_side_pair: tuple[int, int] | None
+    dominant_persistence: float = 0.0
 
 class Layout(StrEnum):
     center_crop = "center_crop"
     face_track = "face_track"
+    face_follow = "face_follow"  # M6f — zoom crop that follows a (weaker) face
     split_screen = "split_screen"
     facecam = "facecam"
 

@@ -42,6 +42,8 @@
 ```python
 center_crop
 face_track
+face_follow   # M6f — zoom crop that follows a (weaker, below-bar) face;
+              # rendered via the same M7e `sendcmd`+`crop` path as face_track
 split_screen
 facecam
 ```
@@ -211,6 +213,7 @@ facecam
     "dominant_track_id": Optional[int],          # highest persistence, tie-break larger mean_area
     "persistent_track_ids": list[int],           # persistence >= 0.6
     "facecam_candidate_track_ids": list[int],    # corner_affinity set AND persistence >= 0.8 AND mean_area < 0.04
-    "side_by_side_pair": Optional[tuple[int, int]]  # two persistent tracks, horizontally separated, mean_area within 2x
+    "side_by_side_pair": Optional[tuple[int, int]],  # two persistent tracks, horizontally separated, mean_area within 2x
+    "dominant_persistence": float                # M6f — dominant track's persistence (0.0 empty); drives face_follow auto-selection
 }
 ```

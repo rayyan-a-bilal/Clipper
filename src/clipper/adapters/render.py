@@ -117,6 +117,14 @@ M7F_ROLES: dict[Layout, tuple[str, ...]] = {
     Layout.facecam: ("main", "face"),
 }
 
+# M6f: layouts rendered via the dynamic `sendcmd`+`crop` mezzanine path
+# (M7e machinery, same geometry — a single full-height 9:16 window whose
+# x is driven by `crop.cmd`). `face_follow` joins `face_track` here.
+DYNAMIC_CROP_LAYOUTS: tuple[Layout, ...] = (
+    Layout.face_track,
+    Layout.face_follow,
+)
+
 
 def _region_key(
     tracks: list[RegionTrack] | None,
@@ -385,9 +393,10 @@ class FFmpegRenderAdapter:
         return self._crop_filter
 
     def _require_sendcmd_support(self) -> None:
-        """The face_track path needs the `crop` filter to accept commands
-        via `sendcmd` (docs/spec/m7.md M7e) — a build without either
-        filter FAILS LOUDLY (no silent path, decision 2)."""
+        """The face_track/face_follow path needs the `crop` filter to
+        accept commands via `sendcmd` (docs/spec/m7.md M7e; face_follow is
+        M6f) — a build without either filter FAILS LOUDLY (no silent path,
+        decision 2)."""
         missing = []
         if not self.sendcmd_filter_available():
             missing.append("sendcmd")
@@ -396,9 +405,9 @@ class FFmpegRenderAdapter:
         if missing:
             raise MediaError(
                 f"ffmpeg build lacks the {'/'.join(missing)} filter(s) — the "
-                "face_track mezzanine drives the crop filter's x/y via "
-                "sendcmd (docs/spec/m7.md M7e). Reinstall an ffmpeg build "
-                "that includes them."
+                "face_track/face_follow mezzanine drives the crop filter's "
+                "x/y via sendcmd (docs/spec/m7.md M7e; M6f for face_follow). "
+                "Reinstall an ffmpeg build that includes them."
             )
 
     @staticmethod
@@ -406,9 +415,9 @@ class FFmpegRenderAdapter:
         """First (t=0) key of `plan.crop_path` (clean MediaError)."""
         if not plan.crop_path:
             raise MediaError(
-                "face_track layout needs plan.crop_path (the M6e main-track "
-                "keys starting at t=0) — produced by the M6e layout stage "
-                "(scripts/layout_job.py)"
+                "face_track/face_follow layout needs plan.crop_path (the "
+                "M6e main-track keys starting at t=0) — produced by the M6e "
+                "layout stage (scripts/layout_job.py)"
             )
         return plan.crop_path[0]
 
@@ -437,7 +446,8 @@ class FFmpegRenderAdapter:
           (explicit DEBUG path only; loudly warned at construction).
 
         `center_crop` (static, M7b) and `face_track` (dynamic sendcmd
-        crop, M7e) render via `-vf`; the MULTI-REGION layouts
+        crop, M7e) / `face_follow` (M6f — same dynamic path) render via
+        `-vf`; the MULTI-REGION layouts
         `split_screen` (two region crops + `vstack`, M7f) and `facecam`
         (`main` band + blurred-fill fit `face` band + `vstack`, M7f)
         render via `-filter_complex` (labeled graph) + `-map [vout]`,
@@ -473,7 +483,7 @@ class FFmpegRenderAdapter:
         if graph is None:
             if resolved is Layout.center_crop:
                 crop_vf = _CENTER_CROP_VF
-            elif resolved is Layout.face_track:
+            elif resolved in DYNAMIC_CROP_LAYOUTS:
                 first = self._face_track_first_key(plan)
                 crop_cmd_path = Path(dst).resolve().parent / CROP_CMD_FILENAME
                 crop_vf = (
@@ -484,7 +494,7 @@ class FFmpegRenderAdapter:
             else:  # unreachable (all Layout members handled above)
                 raise MediaError(
                     f"layout {resolved.value!r} is not renderable — "
-                    "expected one of center_crop/face_track/"
+                    "expected one of center_crop/face_track/face_follow/"
                     "split_screen/facecam"
                 )
             vf = crop_vf
@@ -621,6 +631,7 @@ class FFmpegRenderAdapter:
 
         - `center_crop` static path (M7b, `faces == 0` ok)
         - `face_track` dynamic sendcmd crop path (M7e)
+        - `face_follow` dynamic sendcmd crop path (M6f; same M7e path)
         - `split_screen` / `facecam` multi-region composites (M7f) —
           the region tracks MUST be the M6d/M6e `RegionTrack`s (`tracks`
           kwarg); a missing track/role fails CLEANLY (no silent render).
@@ -632,7 +643,7 @@ class FFmpegRenderAdapter:
             _region_key(None, M7F_ROLES[resolved][0], resolved)
         if native_fps is None:
             native_fps = self._media.probe(source).fps
-        if resolved is Layout.face_track:
+        if resolved in DYNAMIC_CROP_LAYOUTS:
             self._require_sendcmd_support()
         gpu_scale = not self.cpu_render and self.scale_cuda_available()
         if not self.cpu_render and not gpu_scale:
@@ -640,7 +651,7 @@ class FFmpegRenderAdapter:
         elif self.cpu_render:
             logger.warning(CPU_RENDER_WARNING)
         Path(dst).parent.mkdir(parents=True, exist_ok=True)
-        if resolved is Layout.face_track:
+        if resolved in DYNAMIC_CROP_LAYOUTS:
             self._write_crop_cmd(dst, plan.crop_path, float(native_fps))
         self._run_ffmpeg(self.mezzanine_command(
             source, plan, layout, dst, cfg, native_fps, gpu_scale,
@@ -666,8 +677,8 @@ class FFmpegRenderAdapter:
             content = crop_cmd_from_path(crop_path, native_fps)
         except ValueError as e:
             raise MediaError(
-                f"invalid face_track crop_path: {e} — produced by the "
-                "M6e layout stage (scripts/layout_job.py)"
+                f"invalid face_track/face_follow crop_path: {e} — produced "
+                "by the M6e layout stage (scripts/layout_job.py)"
             ) from e
         (Path(dst).parent / CROP_CMD_FILENAME).write_text(
             content, encoding="utf-8")
@@ -837,13 +848,14 @@ class FixtureRenderAdapter:
         tracks: list[RegionTrack] | None = None,
     ) -> MezzanineInfo:
         resolved = _resolve_layout(layout)
-        if resolved is not Layout.center_crop and \
-                resolved is not Layout.face_track and \
+        if resolved not in DYNAMIC_CROP_LAYOUTS and \
+                resolved is not Layout.center_crop and \
                 resolved not in M7F_ROLES:
             raise MediaError(
                 f"layout {resolved.value!r} is not renderable yet — only "
-                "the center_crop static path (M7b), the face_track "
-                "dynamic path (M7e) and the split_screen/facecam "
+                "the center_crop static path (M7b), the face_track/"
+                "face_follow dynamic paths (M7e/M6f) and the "
+                "split_screen/facecam "
                 "multi-region paths (M7f) are implemented "
                 "(docs/spec/m7.md)"
             )
@@ -853,12 +865,12 @@ class FixtureRenderAdapter:
             for role in M7F_ROLES[resolved]:
                 _region_key(tracks, role, resolved)
         Path(dst).parent.mkdir(parents=True, exist_ok=True)
-        if resolved is Layout.face_track:
+        if resolved in DYNAMIC_CROP_LAYOUTS:
             if not plan.crop_path:
                 raise MediaError(
-                    "face_track layout needs plan.crop_path (the M6e "
-                    "main-track keys starting at t=0) — produced by the "
-                    "M6e layout stage (scripts/layout_job.py)"
+                    "face_track/face_follow layout needs plan.crop_path "
+                    "(the M6e main-track keys starting at t=0) — produced "
+                    "by the M6e layout stage (scripts/layout_job.py)"
                 )
             try:
                 content = crop_cmd_from_path(
@@ -867,8 +879,8 @@ class FixtureRenderAdapter:
                 )
             except ValueError as e:
                 raise MediaError(
-                    f"invalid face_track crop_path: {e} — produced by "
-                    f"the M6e layout stage (scripts/layout_job.py)"
+                    f"invalid face_track/face_follow crop_path: {e} — "
+                    "produced by the M6e layout stage (scripts/layout_job.py)"
                 ) from e
             (Path(dst).parent / CROP_CMD_FILENAME).write_text(
                 content, encoding="utf-8")

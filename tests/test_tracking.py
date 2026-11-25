@@ -148,6 +148,37 @@ def test_summarize_persistent_tracks():
     assert sorted(summary.persistent_track_ids) == [0, 1]
 
 
+# --- M6f: dominant_persistence --------------------------------------------
+
+
+def test_summarize_fills_dominant_persistence():
+    frames = two_faces(frame_count=30)
+    tracks = tracking.associate(frames)
+    summary = tracking.summarize(tracks, frame_count=30, frame_w=960, frame_h=540)
+    dom_track = next(t for t in tracks if t.track_id == summary.dominant_track_id)
+    stats = tracking.track_stats(dom_track, frame_count=30, frame_w=960, frame_h=540)
+    assert summary.dominant_persistence == stats["persistence"]
+
+
+def test_summarize_empty_dominant_persistence_zero():
+    summary = tracking.summarize(
+        [], frame_count=10, frame_w=960, frame_h=540
+    )
+    assert summary.dominant_persistence == 0.0
+
+
+def test_track_summary_dominant_persistence_defaults_zero():
+    # Back-compat: a hand-built TrackSummary (M6c-era code) keeps working
+    # with the new M6f field at 0.0.
+    s = TrackSummary(
+        dominant_track_id=None,
+        persistent_track_ids=[],
+        facecam_candidate_track_ids=[],
+        side_by_side_pair=None,
+    )
+    assert s.dominant_persistence == 0.0
+
+
 # --- associate: short occlusion within max_gap_frames ----------------------
 
 
