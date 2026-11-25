@@ -16,8 +16,8 @@ M6e layout stage (docs/spec/m6.md) — per-clip layout + crop path.
     2. decode EVERY frame (``frame_reader`` or the default lazy-cv2 reader)
        and run ``detector.detect(frame, t)`` per frame (``t`` =
        clip-relative seconds, ``t = frame_index / fps``).
-    3. ``tracking.associate`` → ``FaceTrack`` list; ``tracking.summarize``
-       → ``TrackSummary`` (both pure, M6c).
+    3. ``tracking.associate`` → ``bridge_tracks`` (M6g) → ``FaceTrack``
+       list; ``tracking.summarize`` → ``TrackSummary`` (all pure, M6c/M6g).
     4. ``forced_layout`` (``layout_source="manual"``) or
        ``layouts.decide_layout(summary, w, h)`` (``layout_source="auto"``).
     5. ``layouts.build_tracks(..., tracks)`` — the M6d 8-arg form
@@ -56,7 +56,7 @@ from ..models import (
     ProbeResult,
     ShotsArtifact,
 )
-from ..tracking import associate, summarize
+from ..tracking import associate, bridge_tracks, summarize
 from . import StageError
 from .analyze import (
     _finish_stage,
@@ -264,7 +264,7 @@ def _process_clip(
         for frame, t in reader(segment.path, segment.fps)
     ]
 
-    tracks = associate(detections_by_frame)
+    tracks = bridge_tracks(associate(detections_by_frame))  # M6g
     summary = summarize(
         tracks, len(detections_by_frame), segment.width, segment.height
     )

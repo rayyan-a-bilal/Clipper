@@ -501,3 +501,140 @@ def test_track_summary_model_roundtrip():
     data = summary.model_dump_json()
     summary2 = TrackSummary.model_validate_json(data)
     assert summary == summary2
+
+
+# --- M6g — track bridging (docs/spec/m6.md M6g-1) ---------------------------
+
+
+def _track(tid: int, boxes: list[tuple]) -> FaceTrack:
+    return FaceTrack(
+        track_id=tid, boxes=list(boxes), persistence=0.0, corner_affinity=None,
+    )
+
+
+def _seg(t0: float, n: float, x: float = 0.4, y: float = 0.3,
+         dt: float = 1 / 30):
+    """n consecutive boxes starting at t0, centered near (x+w/2, y+h/2)."""
+    w, h = 0.12, 0.15
+    return [(t0 + i * dt, x, y, w, h) for i in range(int(n))]  # type: ignore[list-item]
+
+
+def test_bridge_merges_two_same_person_segments():
+    a = _track(0, _seg(0.0, 20, x=0.40))
+    b = _track(1, _seg(1.2, 20, x=0.42))  # 0.47... gap 1.2-0.633 ≈ 0.57s, close
+    out = tracking.bridge_tracks([a, b])
+    assert len(out) == 1
+    assert out[0].track_id == 0            # earliest segment's id kept
+    assert len(out[0].boxes) == len(a.boxes) + len(b.boxes)
+    # chronological concatenation, boxes themselves unchanged
+    assert out[0].boxes[:20] == a.boxes
+    assert out[0].boxes[20:] == b.boxes
+
+
+def test_bridge_rejects_gap_beyond_max_gap_s():
+    a = _track(0, _seg(0.0, 10))
+    b = _track(1, _seg(2.0, 10))  # gap 2.0 - 0.3 = 1.7s > default 1.0
+    out = tracking.bridge_tracks([a, b])
+    assert len(out) == 2
+    assert {t.track_id for t in out} == {0, 1}
+
+
+def test_bridge_gap_parameter_override():
+    a = _track(0, _seg(0.0, 10))
+    b = _track(1, _seg(2.0, 10))
+    out = tracking.bridge_tracks([a, b], max_gap_s=2.0)
+    assert len(out) == 1 and out[0].track_id == 0
+
+
+def test_bridge_rejects_far_centroid_different_person():
+    a = _track(0, _seg(0.0, 10, x=0.10))   # left of frame
+    b = _track(1, _seg(0.5, 10, x=0.70))   # right of frame, 0.6s gap
+    out = tracking.bridge_tracks([a, b])
+    assert len(out) == 2
+
+
+def test_bridge_centroid_parameter_override():
+    a = _track(0, _seg(0.0, 10, x=0.10))
+    b = _track(1, _seg(0.5, 10, x=0.70))
+    out = tracking.bridge_tracks([a, b], max_centroid_dist=1.0)
+    assert len(out) == 1
+
+
+def test_bridge_rejects_time_overlap():
+    a = _track(0, _seg(0.0, 300))           # 0..9.97s
+    b = _track(1, _seg(5.0, 10, x=0.41))    # starts INSIDE a
+    out = tracking.bridge_tracks([a, b])
+    assert len(out) == 2
+    assert {t.track_id for t in out} == {0, 1}
+
+
+def test_bridge_chains_three_segments():
+    a = _track(0, _seg(0.0, 10))
+    b = _track(1, _seg(0.5, 10, x=0.41))
+    c = _track(2, _seg(1.1, 10, x=0.43))
+    out = tracking.bridge_tracks([a, b, c])
+    assert len(out) == 1
+    assert out[0].track_id == 0
+    assert out[0].boxes == a.boxes + b.boxes + c.boxes
+
+
+def test_bridge_picks_nearest_candidate_then_tid():
+    a = _track(0, _seg(0.0, 10, x=0.35))
+    b = _track(1, _seg(0.0, 10, x=0.45))
+    # c is closer to b (x=0.47) than to a (x=0.33)
+    c = _track(2, _seg(0.5, 10, x=0.47))
+    out = tracking.bridge_tracks([a, b, c])
+    assert len(out) == 2
+    merged = [t for t in out if len(t.boxes) > 10][0]
+    assert merged.track_id == 1
+    a_alone = [t for t in out if t.track_id == 0][0]
+    assert a_alone.boxes == a.boxes
+    # tie-break: two equidistant candidates -> smaller tid wins
+    a2 = _track(0, _seg(0.0, 10, x=0.40))
+    b2 = _track(5, _seg(0.0, 10, x=0.40))
+    c2 = _track(9, _seg(0.5, 10, x=0.60))  # equal dist (0.2) to a2 and b2
+    out2 = tracking.bridge_tracks([a2, b2, c2])
+    assert [t.track_id for t in out2] == [0, 5]
+    assert [t for t in out2 if len(t.boxes) > 10][0].track_id == 0
+
+
+def test_bridge_input_order_independent():
+    a = _track(7, _seg(2.0, 10))
+    b = _track(1, _seg(0.0, 10, x=0.41))
+    c = _track(3, _seg(1.0, 10, x=0.39))
+    base = tracking.bridge_tracks([a, b, c])
+    other = tracking.bridge_tracks([c, a, b])  # permuted input
+    assert [(t.track_id, list(t.boxes)) for t in base] == \
+        [(t.track_id, list(t.boxes)) for t in other]
+
+
+def test_bridge_empty_and_single():
+    assert tracking.bridge_tracks([]) == []
+    one = _track(4, _seg(0.0, 5))
+    out = tracking.bridge_tracks([one])
+    assert len(out) == 1
+    assert out[0].track_id == 4
+    assert list(out[0].boxes) == list(one.boxes)
+
+
+def test_bridge_integrates_with_associate_and_summarize():
+    # Speaker visible frames 0..29 and 42..59 (30fps), dropout 30..41
+    # (0.4s > associate's 3-frame gap) -> two tracks. Bridging must
+    # re-join them into ONE persistent track.
+    frames: list[list[FaceDetection]] = []
+    for fi in range(60):
+        t = fi / 30.0
+        if fi <= 29 or fi >= 42:
+            frames.append([FaceDetection(t=t, x=0.40, y=0.30, w=0.12, h=0.15,
+                                         score=0.9)])
+        else:
+            frames.append([])
+    tracks = tracking.associate(frames)
+    assert len(tracks) == 2  # fragmentation is real (0.4s dropout > 100ms)
+    before = tracking.summarize(tracks, 60).dominant_persistence
+    bridged = tracking.bridge_tracks(tracks)
+    assert len(bridged) == 1
+    after = tracking.summarize(bridged, 60)
+    assert after.dominant_persistence == pytest.approx(48 / 60)
+    assert after.dominant_persistence >= before
+    assert after.persistent_track_ids == [bridged[0].track_id]

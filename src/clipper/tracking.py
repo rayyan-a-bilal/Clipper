@@ -5,6 +5,8 @@ Unit-testable with synthetic `FaceDetection` objects only.
 """
 from __future__ import annotations
 
+import math
+
 from clipper.models import FaceDetection, FaceTrack, TrackSummary
 
 # --- Module constants (M6c) ---
@@ -14,6 +16,9 @@ PERSISTENT_THRESHOLD = 0.6          # persistence >= 0.6 => "persistent"
 FACECAM_PERSISTENCE = 0.8           # persistence >= 0.8 for facecam candidate
 FACECAM_MAX_AREA = 0.04             # mean_area < 0.04 for facecam candidate
 SIDE_BY_SIDE_MAX_RATIO = 2.0        # max/min area ratio for side_by_side pair
+# --- Module constants (M6g — track bridging) ---
+BRIDGE_MAX_GAP_S = 1.0              # > 1.0s gap = different person/shot, not a dropout
+BRIDGE_MAX_CENTROID_DIST = 0.30     # max normalized centroid drift between segments
 
 
 def _box_iou(
@@ -135,6 +140,90 @@ def associate(
             corner_affinity=None,
         )
         for tid in sorted(tracks_data)
+    ]
+
+
+def _centroid(box: tuple) -> tuple[float, float]:
+    """(cx, cy) of a (t, x, y, w, h) box (normalized units, t ignored)."""
+    _t, x, y, w, h = box
+    return x + w / 2.0, y + h / 2.0
+
+
+def bridge_tracks(
+    tracks: list[FaceTrack],
+    max_gap_s: float = BRIDGE_MAX_GAP_S,
+    max_centroid_dist: float = BRIDGE_MAX_CENTROID_DIST,
+) -> list[FaceTrack]:
+    """Re-join fragmented tracks (M6g, docs/spec/m6.md M6g-1).
+
+    `associate` finalizes a track after a short detection dropout
+    (max_gap_frames) and a re-appearance starts a NEW track id. A single
+    speaker split into 2+ segments then breaks `build_tracks` (it follows
+    only the DOMINANT track — the crop freezes at that segment's last
+    position). Merging the segments back into one track lets the crop
+    path follow the speaker end-to-end.
+
+    Deterministic greedy, tracks considered in FIRST-APPEARANCE order
+    (first-box time ASC, ties track_id ASC — input order independent):
+      - B merges into an already-merged M IFF `last(M).t < first(B).t`
+        (strict, no time overlap), `first(B).t - last(M).t <= max_gap_s`
+        AND centroid distance `dist(last(M), first(B)) <= max_centroid_dist`
+        (normalized units — see `_centroid`);
+      - multiple eligible M: smallest centroid distance, ties by smaller
+        merged track_id; none → B stands alone;
+      - result: EARLIEST segment's track_id kept, boxes concatenated in
+        time order, all boxes unchanged.
+
+    Box count is preserved across the merge (persistence math is
+    unchanged; `summarize` sees one continuous track instead of several).
+    """
+    if not tracks:
+        return []
+
+    ordered = sorted(
+        tracks,
+        key=lambda t: (t.boxes[0][0] if t.boxes else float("inf"), t.track_id),
+    )
+    merged: list[dict] = []  # {"tid", "boxes"}
+
+    for track in ordered:
+        boxes = list(track.boxes)
+        if not boxes:
+            merged.append({"tid": track.track_id, "boxes": []})
+            continue
+        first_t = boxes[0][0]
+        first_c = _centroid(boxes[0])
+        best: tuple | None = None  # (dist, merged_index, tid)
+        for mi, m in enumerate(merged):
+            mboxes = m["boxes"]
+            if not mboxes:
+                continue
+            if mboxes[-1][0] >= first_t:      # strict: no time overlap
+                continue
+            gap = first_t - mboxes[-1][0]
+            if gap > max_gap_s:
+                continue
+            mc = _centroid(mboxes[-1])
+            dist = math.hypot(first_c[0] - mc[0], first_c[1] - mc[1])
+            if dist > max_centroid_dist:
+                continue
+            key = (dist, mi, m["tid"])
+            if best is None or key < best:
+                best = key
+        if best is None:
+            merged.append({"tid": track.track_id, "boxes": boxes})
+        else:
+            _dist, mi, _tid = best
+            merged[mi]["boxes"].extend(boxes)
+
+    return [
+        FaceTrack(
+            track_id=m["tid"],
+            boxes=[(b[0], b[1], b[2], b[3], b[4]) for b in m["boxes"]],
+            persistence=0.0,
+            corner_affinity=None,
+        )
+        for m in merged
     ]
 
 

@@ -58,7 +58,9 @@ def style_fields(ass_text, name):
             # underline, strike, scaleX, scaleY, spacing, angle, border,
             # outline, shadow, alignment, margin_l, margin_r, margin_v, enc
             return {
-                "font": rest[0], "size": rest[1], "bold": rest[6],
+                "font": rest[0], "size": rest[1],
+                "primary": rest[2], "secondary": rest[3],
+                "bold": rest[6],
                 "border": rest[14], "outline": rest[15], "shadow": rest[16],
                 "alignment": rest[17], "margin_l": rest[18],
                 "margin_r": rest[19], "margin_v": rest[20],
@@ -152,11 +154,9 @@ def test_grouping_word_cap_and_line_limits():
         assert len(lines) <= 2
         for line in lines:
             plain = re.sub(r"\{[^}]*\}", "", line).strip()
-            # each word appears twice (unsung + sung karaoke copies)
-            toks = plain.split()
-            unique = " ".join(toks[::2])
-            assert len(unique) <= 20
-            assert len(unique.split()) <= 4
+            toks = plain.split()  # M7h: each word appears ONCE
+            assert len(" ".join(toks)) <= 20
+            assert len(toks) <= 4
     # 8 distinct words all present
     for w in ["one", "two", "three", "four", "five", "six", "seven", "eight"]:
         assert w in out_text(evs)
@@ -179,25 +179,36 @@ def test_line_fill_forces_new_group_within_max_lines():
             plain = re.sub(r"\{[^}]*\}", "", line).strip()
             toks = plain.split()
             assert len(toks) == 1  # 10-char word: one per line (21 > 20)
-            # karaoke renders each word twice (unsung + sung) with no space
-            assert toks[0] == "abcdefghij" * 2
-    # NO word dropped: all 6 present (2x each from karaoke)
+            # M7h: exact single copy (old format rendered `abcdefghijabcdefghij`)
+            assert toks[0] == "abcdefghij"
+    # NO word dropped: all 6 present (exactly once each — M7h)
     total = sum(e["text"].count("abcdefghij") for e in evs)
-    assert total == 12
+    assert total == 6
 
 
-def test_karaoke_tags_unsung_yellow_sung_white():
+def test_karaoke_word_emitted_once_m7h():
+    """M7h regression: each word is written EXACTLY once per event.
+
+    The M7a format emitted the word twice (`{\\kf}{\\c..}w{\\r}{\\c..}w`);
+    ASS format tags do not consume text, so real renders showed doubled
+    words (`Oh,Oh, there'sthere's`). Karaoke colors come from the Caption
+    STYLE: PrimaryColour = sung white, SecondaryColour = unsung yellow.
+    """
     out = captions.words_to_ass(
-        [W(10.0, 11.5, "hello")], make_plan(start=10.0, end=12.0), cfg_default()
+        [W(10.0, 11.5, "Oh,"), W(11.6, 13.0, "there's")],
+        make_plan(start=10.0, end=14.0), cfg_default()
     )
     evs = [e for e in events(out) if e["style"] == "Caption"]
     text = evs[0]["text"]
-    assert r"{\kf150}" in text  # 1.5s in centiseconds
-    assert (r"{\c&H00FFFF&}hello" in text)  # unsung = yellow
-    assert r"{\r}" in text
-    assert (r"{\c&HFFFFFF&}hello" in text)  # sung = white
-    # highlight comes BEFORE its sung copy
-    assert text.index(r"\c&H00FFFF&") < text.index(r"\c&HFFFFFF&")
+    # exactly one karaoke span + one copy per word — never `Oh,Oh,`
+    assert text.count("Oh,") == 1
+    assert text.count("there's") == 1
+    assert text.count(r"\kf") == 2
+    assert r"\c" not in text  # no inline color overrides at all
+    assert r"{\kf150}Oh," in text  # 1.5s in centiseconds, word once
+    s = style_fields(out, "Caption")
+    assert s["primary"] == "&HFFFFFF&"   # sung = white (style, not inline)
+    assert s["secondary"] == "&H00FFFF&"  # unsung highlight = yellow
 
 
 def test_min_display_0_6_seconds():

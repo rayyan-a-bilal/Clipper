@@ -119,11 +119,16 @@ def _group_words(
 
 
 def _word_karaoke(rs: float, re_: float, text: str) -> str:
+    """One `\\kf`-karaoke word, emitted EXACTLY ONCE (M7h).
+
+    Karaoke colors come from the Caption STYLE (PrimaryColour = sung,
+    SecondaryColour = unsung highlight); the per-word inline `\\c` overrides
+    of M7a were wrong because ASS format tags don't consume text — the
+    double copy rendered as literal doubled words (`Oh,Oh,`).
+    """
     cs = max(1, int(round((re_ - rs) * 100.0)))
-    return (
-        rf"{{\kf{cs}}}{{\c{HIGHLIGHT_COLOR}}}{text}"
-        rf"{{\r}}{{\c{SUNG_COLOR}}}{text}"
-    )
+    return rf"{{\kf{cs}}}{text}"
+
 
 
 def _group_text(lines: list[list[tuple[float, float, str]]]) -> str:
@@ -136,11 +141,12 @@ def _group_text(lines: list[list[tuple[float, float, str]]]) -> str:
 
 def _style_line(
     name: str, font: str, size: int, alignment: int, margin_l: int,
-    margin_r: int, margin_v: int
+    margin_r: int, margin_v: int, primary: str = SUNG_COLOR,
+    secondary: str = SUNG_COLOR
 ) -> str:
     return (
         f"Style: {name},{font},{size},"
-        f"&H00FFFFFF&,&H000000FF&,&H80000000&,&H00000000&,"
+        f"{primary},{secondary},&H80000000&,&H00000000&,"
         f"1,0,0,0,100,100,0,0,1,4,0,{alignment},{margin_l},{margin_r},"
         f"{margin_v},1"
     )
@@ -154,8 +160,9 @@ def words_to_ass(words: list, plan, cfg) -> str:
     - <= `cfg.captions.max_words_per_group` per group,
       <= `cfg.captions.max_chars_per_line` per line, <= `max_lines` lines
     - min display `MIN_DISPLAY_S` (0.6s) per caption event
-    - per-word `\\kf` karaoke (unsung yellow `&H00FFFF&` -> sung white
-      `&HFFFFFF&`)
+    - per-word `\\kf` karaoke, each word ONCE (M7h); colors from the
+      Caption style: unsung yellow `&H00FFFF&` (SecondaryColour) -> sung
+      white `&HFFFFFF&` (PrimaryColour)
     - hook overlay: separate top style, first
       `min(cfg.clips.hook_overlay_duration, clip duration)` seconds, only
       when `plan.hook_overlay` is non-empty
@@ -196,7 +203,9 @@ def words_to_ass(words: list, plan, cfg) -> str:
     caption_style = _style_line(
         "Caption", cap.font, cap.font_size, alignment=2,
         margin_l=cap.safe_zone_right, margin_r=cap.safe_zone_right,
-        margin_v=cap.margin_v
+        margin_v=cap.margin_v,
+        primary=SUNG_COLOR,          # sung (M7h: karaoke colors are STYLE colors)
+        secondary=HIGHLIGHT_COLOR    # unsung yellow highlight
     )
     hook_style = _style_line(
         "Hook", cap.font, HOOK_FONT_SIZE, alignment=8,
