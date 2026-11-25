@@ -170,7 +170,7 @@ def test_center_crop_command_hwaccel_nvenc_no_libx264():
     assert "libx264" not in cmd
     vf = cmd[cmd.index("-vf") + 1]
     assert "crop=w=trunc(ih*9/16/2)*2:h=ih:x=(iw-ow)/2:y=0" in vf
-    assert "hwupload_cuda,scale_cuda=1080:1920:format=nv12" in vf
+    assert "hwupload_cuda,scale_cuda=1080:1920" in vf
     assert "-preset" in cmd and cmd[cmd.index("-preset") + 1] == "p5"
     assert "-rc" in cmd and cmd[cmd.index("-rc") + 1] == "vbr"
     assert "-cq" in cmd and cmd[cmd.index("-cq") + 1] == "16"
@@ -229,7 +229,7 @@ def test_split_screen_command_two_crops_vstack_nvenc_no_libx264():
     assert "crop=w=608:h=1080:x=1160:y=0" in graph
     assert "[top][bottom]vstack=inputs=2[vout]" in graph
     # GPU scale per band (1080x960) — CUDA preferred
-    assert graph.count("hwupload_cuda,scale_cuda=1080:960:format=nv12") == 2
+    assert graph.count("hwupload_cuda,scale_cuda=1080:960") == 2
     assert cmd.index("-i") < cmd.index("-filter_complex")
 
 
@@ -311,8 +311,8 @@ def test_facecam_command_main_face_regions_nvenc_no_libx264():
     assert "crop=w=606:h=1080:x=657:y=0" in graph
     assert "crop=w=200:h=200:x=100:y=80" in graph
     # main band 1080x608 (top), face aspect-fit 1080x1080 (bottom 1080x1312)
-    assert "scale_cuda=1080:608:format=nv12" in graph
-    assert "scale_cuda=1080:1080:format=nv12" in graph
+    assert "scale_cuda=1080:608" in graph
+    assert "scale_cuda=1080:1080" in graph
     # aspect differs -> blurred fill behind the face region
     assert "force_original_aspect_ratio=increase" in graph
     assert "crop=1080:1312" in graph
@@ -337,7 +337,7 @@ def test_facecam_exact_aspect_skips_blurred_fill():
     graph = cmd[cmd.index("-filter_complex") + 1]
     assert "boxblur" not in graph
     assert "overlay=" not in graph
-    assert "scale_cuda=1080:1312:format=nv12" in graph
+    assert "scale_cuda=1080:1312" in graph
     assert "[main][face]vstack=inputs=2[vout]" in graph
 
 
@@ -393,7 +393,7 @@ def test_face_track_command_sendcmd_crop_nvenc_no_libx264():
     assert f"sendcmd=f={crop_cmd_path}," in vf
     first = plan.crop_path[0]
     assert f"crop=w={first.w}:h={first.h}:x={first.x}:y={first.y}" in vf
-    assert "hwupload_cuda,scale_cuda=1080:1920:format=nv12" in vf
+    assert "hwupload_cuda,scale_cuda=1080:1920" in vf
     # sendcmd BEFORE the crop filter (it drives the crop filter's x/y)
     assert vf.index("sendcmd") < vf.index("crop=")
 
@@ -529,7 +529,7 @@ def test_render_mezzanine_prefers_scale_cuda(tmp_path, monkeypatch):
     render_calls = [c for c in fake.calls if "-filters" not in c]
     assert len(render_calls) == 1
     vf = render_calls[0][render_calls[0].index("-vf") + 1]
-    assert "scale_cuda=1080:1920:format=nv12" in vf
+    assert "scale_cuda=1080:1920" in vf
 
 
 def test_render_mezzanine_cpu_scale_fallback_keeps_nvenc_and_warns(

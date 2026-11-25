@@ -43,7 +43,7 @@ M7 fixed decisions implemented (docs/spec/m7.md):
 `center_crop` static vf (docs/spec/m7.md M7b):
 
     GPU scale: crop=w=trunc(ih*9/16/2)*2:h=ih:x=(iw-ow)/2:y=0,
-               hwupload_cuda,scale_cuda={w}:{h}:format=nv12
+               hwupload_cuda,scale_cuda={w}:{h}
     CPU fallback (scale_cuda absent, warned loudly):
                crop=w=trunc(ih*9/16/2)*2:h=ih:x=(iw-ow)/2:y=0,
                scale={w}:{h}:flags=lanczos
@@ -53,7 +53,7 @@ file written beside the mezzanine (`sendcmd_filter_available()` must be
 ture; a build without `sendcmd`/`crop` fails LOUDLY):
 
     sendcmd=f={crop.cmd},crop=w={w}:h={h}:x={x0}:y={y0},
-    hwupload_cuda,scale_cuda={w}:{h}:format=nv12
+    hwupload_cuda,scale_cuda={w}:{h}
     (crop w/h/x0/y0 = the first `plan.crop_path` key; dense per-key
     x/y commands come from `clipper.render_paths.crop_cmd_from_path`)
 """
@@ -157,7 +157,7 @@ def _scale_chain(width: int, height: int, gpu_scale: bool) -> str:
     warning is logged by `render_mezzanine`, decision 2)."""
     if gpu_scale:
         return (
-            f"hwupload_cuda,scale_cuda={width}:{height}:format=nv12,"
+            f"hwupload_cuda,scale_cuda={width}:{height},"
             f"hwdownload_cuda,format=nv12"
         )
     return f"scale={width}:{height}:flags=lanczos"
@@ -428,7 +428,7 @@ class FFmpegRenderAdapter:
         """Exact M7b/M7e/M7f mezzanine command for ONE path:
 
         - `gpu_scale=True` and not `cpu_render`: `-hwaccel cuda` +
-          `hwupload_cuda,scale_cuda=W:H:format=nv12` (or the per-band
+          `hwupload_cuda,scale_cuda=W:H` (or the per-band
           M7f `scale_cuda` chains) + `h264_nvenc`.
         - `gpu_scale=False` and not `cpu_render`: CPU scale
           `scale=W:H:flags=lanczos`, encode STAYS `h264_nvenc` (loud
@@ -493,7 +493,7 @@ class FFmpegRenderAdapter:
             elif gpu_scale:
                 vf = (
                     f"{vf},"
-                    f"hwupload_cuda,scale_cuda={width}:{height}:format=nv12"
+                    f"hwupload_cuda,scale_cuda={width}:{height}"
                 )
             else:
                 vf = f"{vf},scale={width}:{height}:flags=lanczos"
