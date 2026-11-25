@@ -183,12 +183,175 @@ def test_center_crop_command_hwaccel_nvenc_no_libx264():
     assert cmd[-1] == "out.mp4"
 
 
-def test_mezzanine_command_rejects_unimplemented_layouts():
+def test_mezzanine_command_rejects_unknown_layouts():
     adapter = FFmpegRenderAdapter()
-    for layout in (Layout.split_screen, Layout.facecam, "bogus"):
+    for layout in ("bogus",):
         with pytest.raises(MediaError):
             adapter.mezzanine_command(
                 "s", make_plan(), layout, "d", CFG, native_fps=30.0, gpu_scale=True)
+
+
+def _region_tracks(layout: Layout) -> list:
+    """Valid M6d-style tracks: split (top/bottom full-height 9:16) and
+    facecam (main exact-9:16 + face 200x200 square), source 1920x1080."""
+    from clipper.models import RegionTrack
+    if layout is Layout.split_screen:
+        return [
+            RegionTrack(role="top", keys=[
+                CropKey(t=0.0, x=152, y=0, w=608, h=1080)]),
+            RegionTrack(role="bottom", keys=[
+                CropKey(t=0.0, x=1160, y=0, w=608, h=1080)]),
+        ]
+    return [
+        RegionTrack(role="main", keys=[
+            CropKey(t=0.0, x=657, y=0, w=606, h=1080)]),
+        RegionTrack(role="face", keys=[
+            CropKey(t=0.0, x=100, y=80, w=200, h=200)]),
+    ]
+
+
+def test_split_screen_command_two_crops_vstack_nvenc_no_libx264():
+    adapter = FFmpegRenderAdapter()
+    cmd = adapter.mezzanine_command(
+        "src.mp4", make_plan(), Layout.split_screen, "out/clip/mezzanine.mp4",
+        CFG, native_fps=30.0, gpu_scale=True,
+        tracks=_region_tracks(Layout.split_screen))
+    assert cmd[0] == "ffmpeg"
+    assert "-hwaccel" in cmd and cmd[cmd.index("-hwaccel") + 1] == "cuda"
+    assert "h264_nvenc" in cmd
+    assert "libx264" not in cmd
+    assert "-filter_complex" in cmd
+    assert "-map" in cmd and cmd[cmd.index("-map") + 1] == "[vout]"
+    graph = cmd[cmd.index("-filter_complex") + 1]
+    # two region crops + vstack into [vout]
+    assert graph.count("crop=w=608:h=1080:") == 2
+    assert "crop=w=608:h=1080:x=152:y=0" in graph
+    assert "crop=w=608:h=1080:x=1160:y=0" in graph
+    assert "[top][bottom]vstack=inputs=2[vout]" in graph
+    # GPU scale per band (1080x960) — CUDA preferred
+    assert graph.count("hwupload_cuda,scale_cuda=1080:960:format=nv12") == 2
+    assert cmd.index("-i") < cmd.index("-filter_complex")
+
+
+def test_split_screen_cpu_scale_fallback_keeps_nvenc_and_warns(
+        tmp_path, monkeypatch, caplog):
+    fake = FakeFFmpeg(filters_out=FILTERS_CPU_SENDCMD)  # no scale_cuda
+    install_fake(monkeypatch, fake)
+    adapter = FFmpegRenderAdapter()
+    monkeypatch.setattr(adapter._media, "probe", lambda p: probe_result())
+    src = tmp_path / "src.mp4"
+    src.write_bytes(b"x")
+    with caplog.at_level("WARNING", logger="clipper.adapters.render"):
+        adapter.render_mezzanine(
+            str(src), make_plan(), Layout.split_screen,
+            str(tmp_path / "clips" / "c1" / "m.mp4"), CFG,
+            native_fps=30.0, tracks=_region_tracks(Layout.split_screen))
+    cmd = fake.calls[-1]
+    assert "h264_nvenc" in cmd  # encode STAYS NVENC
+    assert "libx264" not in cmd
+    assert "-hwaccel" not in cmd  # CPU path: no NVDEC either
+    graph = cmd[cmd.index("-filter_complex") + 1]
+    assert graph.count("scale=1080:960:flags=lanczos") == 2
+    assert "scale_cuda" not in graph
+    warnings = [r.message for r in caplog.records if "scale_cuda" in r.message]
+    assert warnings, "CPU scale fallback must log a LOUD warning"
+
+
+def test_facecam_cpu_scale_fallback_keeps_nvenc_and_warns(
+        tmp_path, monkeypatch, caplog):
+    fake = FakeFFmpeg(filters_out=FILTERS_CPU_SENDCMD)  # no scale_cuda
+    install_fake(monkeypatch, fake)
+    adapter = FFmpegRenderAdapter()
+    monkeypatch.setattr(adapter._media, "probe", lambda p: probe_result())
+    src = tmp_path / "src.mp4"
+    src.write_bytes(b"x")
+    with caplog.at_level("WARNING", logger="clipper.adapters.render"):
+        adapter.render_mezzanine(
+            str(src), make_plan(), Layout.facecam,
+            str(tmp_path / "clips" / "c1" / "m.mp4"), CFG,
+            native_fps=30.0, tracks=_region_tracks(Layout.facecam))
+    cmd = fake.calls[-1]
+    assert "h264_nvenc" in cmd
+    assert "libx264" not in cmd
+    assert "-hwaccel" not in cmd
+    graph = cmd[cmd.index("-filter_complex") + 1]
+    assert "scale=1080:608:flags=lanczos" in graph
+    assert "scale_cuda" not in graph
+    assert "boxblur=8:1.5" in graph
+    assert any("scale_cuda" in r.message for r in caplog.records)
+
+def test_split_screen_requires_tracks_or_roles(tmp_path):
+    adapter = FFmpegRenderAdapter()
+    tracks = _region_tracks(Layout.split_screen)
+    # missing tracks entirely
+    with pytest.raises(MediaError, match="tracks"):
+        adapter.mezzanine_command(
+            "s", make_plan(), Layout.split_screen, str(tmp_path / "m.mp4"),
+            CFG, native_fps=30.0, gpu_scale=True, tracks=None)
+    # missing a required role (no `bottom`)
+    with pytest.raises(MediaError, match="bottom"):
+        adapter.mezzanine_command(
+            "s", make_plan(), Layout.split_screen, str(tmp_path / "m.mp4"),
+            CFG, native_fps=30.0, gpu_scale=True,
+            tracks=tracks[:1])
+
+
+def test_facecam_command_main_face_regions_nvenc_no_libx264():
+    adapter = FFmpegRenderAdapter()
+    cmd = adapter.mezzanine_command(
+        "src.mp4", make_plan(), Layout.facecam, "out/clip/mezzanine.mp4",
+        CFG, native_fps=30.0, gpu_scale=True, tracks=_region_tracks(Layout.facecam))
+    assert cmd[0] == "ffmpeg"
+    assert "h264_nvenc" in cmd
+    assert "libx264" not in cmd
+    assert "-filter_complex" in cmd
+    assert "-map" in cmd and cmd[cmd.index("-map") + 1] == "[vout]"
+    graph = cmd[cmd.index("-filter_complex") + 1]
+    # main + face crops (the face region is tracked as a square here)
+    assert "crop=w=606:h=1080:x=657:y=0" in graph
+    assert "crop=w=200:h=200:x=100:y=80" in graph
+    # main band 1080x608 (top), face aspect-fit 1080x1080 (bottom 1080x1312)
+    assert "scale_cuda=1080:608:format=nv12" in graph
+    assert "scale_cuda=1080:1080:format=nv12" in graph
+    # aspect differs -> blurred fill behind the face region
+    assert "force_original_aspect_ratio=increase" in graph
+    assert "crop=1080:1312" in graph
+    assert "boxblur=8:1.5" in graph
+    assert "overlay=(W-w)/2:(H-h)/2" in graph
+    # vstack of the two bands into [vout] (1080x1920)
+    assert "[main][bot]vstack=inputs=2[vout]" in graph
+
+
+def test_facecam_exact_aspect_skips_blurred_fill():
+    adapter = FFmpegRenderAdapter()
+    from clipper.models import RegionTrack
+    tracks = [
+        RegionTrack(role="main", keys=[
+            CropKey(t=0.0, x=0, y=0, w=606, h=1080)]),
+        RegionTrack(role="face", keys=[
+            CropKey(t=0.0, x=0, y=0, w=270, h=328)]),  # 270:328 == 1080:1312
+    ]
+    cmd = adapter.mezzanine_command(
+        "s", make_plan(), Layout.facecam, "d", CFG,
+        native_fps=30.0, gpu_scale=True, tracks=tracks)
+    graph = cmd[cmd.index("-filter_complex") + 1]
+    assert "boxblur" not in graph
+    assert "overlay=" not in graph
+    assert "scale_cuda=1080:1312:format=nv12" in graph
+    assert "[main][face]vstack=inputs=2[vout]" in graph
+
+
+def test_facecam_requires_tracks_or_roles(tmp_path):
+    adapter = FFmpegRenderAdapter()
+    with pytest.raises(MediaError, match="tracks"):
+        adapter.mezzanine_command(
+            "s", make_plan(), Layout.facecam, str(tmp_path / "m.mp4"),
+            CFG, native_fps=30.0, gpu_scale=True, tracks=None)
+    tracks = _region_tracks(Layout.facecam)
+    with pytest.raises(MediaError, match="face"):
+        adapter.mezzanine_command(
+            "s", make_plan(), Layout.facecam, str(tmp_path / "m.mp4"),
+            CFG, native_fps=30.0, gpu_scale=True, tracks=tracks[:1])
 
 
 def test_mezzanine_command_rejects_face_track_without_crop_path():
@@ -574,11 +737,70 @@ def test_fixture_mezzanine_honours_native_fps_and_rejects_bad_layout(tmp_path):
                                     str(tmp_path / "m.mp4"), CFG, native_fps=24.0)
     assert info.fps == pytest.approx(24.0)
     with pytest.raises(MediaError):
-        adapter.render_mezzanine("s", make_plan(), Layout.split_screen,
-                                 str(tmp_path / "m2.mp4"), CFG)
-    with pytest.raises(MediaError):
-        adapter.render_mezzanine("s", make_plan(), Layout.facecam,
-                                 str(tmp_path / "m3.mp4"), CFG)
+        adapter.render_mezzanine("s", make_plan(), "bogus",
+                                 str(tmp_path / "m4.mp4"), CFG)
+    # M7f: split_screen/facecam ARE renderable, but they REQUIRE the
+    # region tracks (clean MediaError without them, nothing written)
+    for layout in (Layout.split_screen, Layout.facecam):
+        with pytest.raises(MediaError, match="tracks"):
+            adapter.render_mezzanine("s", make_plan(), layout,
+                                     str(tmp_path / "m2.mp4"), CFG)
+        assert not (tmp_path / "m2.mp4").exists()
+
+
+def test_fixture_split_screen_contract_and_determinism(tmp_path):
+    """M7f fixture adapter: split_screen renders the placeholder
+    mezzanine with valid contracts; repeated calls are byte-identical
+    (determinism)."""
+    adapter = FixtureRenderAdapter()
+    tracks = _region_tracks(Layout.split_screen)
+    dst = tmp_path / "c1" / "m.mp4"
+    info1 = adapter.render_mezzanine(
+        "s", make_plan(), Layout.split_screen, str(dst), CFG,
+        native_fps=30.0, tracks=tracks)
+    body1 = dst.read_text(encoding="utf-8")
+    json1 = info1.model_dump_json(indent=2)
+    info2 = adapter.render_mezzanine(
+        "s", make_plan(), Layout.split_screen, str(dst), CFG,
+        native_fps=30.0, tracks=tracks)
+    assert dst.is_file()
+    assert isinstance(info1, MezzanineInfo)
+    assert (info1.width, info1.height) == (1080, 1920)
+    assert info1.duration_s == pytest.approx(15.0)
+    # determinism: byte-identical placeholder + contract
+    assert dst.read_text(encoding="utf-8") == body1
+    assert info2.model_dump_json(indent=2) == json1
+
+
+def test_fixture_facecam_contract_and_determinism(tmp_path):
+    """M7f fixture adapter: facecam renders the placeholder mezzanine
+    with valid contracts; repeated calls are byte-identical."""
+    adapter = FixtureRenderAdapter()
+    tracks = _region_tracks(Layout.facecam)
+    dst = tmp_path / "c2" / "m.mp4"
+    info1 = adapter.render_mezzanine(
+        "s", make_plan(), Layout.facecam, str(dst), CFG,
+        native_fps=30.0, tracks=tracks)
+    body1 = dst.read_text(encoding="utf-8")
+    json1 = info1.model_dump_json(indent=2)
+    info2 = adapter.render_mezzanine(
+        "s", make_plan(), Layout.facecam, str(dst), CFG,
+        native_fps=30.0, tracks=tracks)
+    assert dst.is_file()
+    assert isinstance(info1, MezzanineInfo)
+    assert (info1.width, info1.height) == (1080, 1920)
+    assert dst.read_text(encoding="utf-8") == body1
+    assert info2.model_dump_json(indent=2) == json1
+
+
+def test_fixture_facecam_rejects_missing_face_role(tmp_path):
+    adapter = FixtureRenderAdapter()
+    tracks = _region_tracks(Layout.facecam)[:1]  # only `main`
+    with pytest.raises(MediaError, match="face"):
+        adapter.render_mezzanine(
+            "s", make_plan(), Layout.facecam, str(tmp_path / "m9.mp4"),
+            CFG, native_fps=30.0, tracks=tracks)
+    assert not (tmp_path / "m9.mp4").exists()
 
 
 def test_fixture_face_track_writes_crop_cmd_beside(tmp_path):

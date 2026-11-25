@@ -86,15 +86,34 @@ def _layout_artifact(
     clip_id: str,
     layout: str = "center_crop",
     face_track_count: int = 0,
+    with_tracks: bool = True,
 ) -> dict:
-    """A VALID M6e layout (`faces == 0` center_crop default, decision 8):
-    one static exact-9:16 main track; face_track variant has a moving
-    full-height window (t=0 first, native 30fps key grid)."""
+    """A VALID M6e layout artifact (schema_version=1). Variants:
+    `center_crop` (static exact-9:16 main), `face_track` (moving
+    full-height window) and the M7f multi-region `split_screen`
+    (`top`+`bottom`) / `facecam` (`main`+`face`). `with_tracks=False`
+    omits the `tracks` list entirely (adapter-level failure case)."""
     x0 = (1920 - 608) // 2
     if layout == "face_track":
         keys = [
             CropKey(t=i / 30.0, x=x0 + i, y=0, w=608, h=1080)
             for i in range(25)
+        ]
+        tracks = [{"role": "main", "keys": [k.model_dump() for k in keys]}]
+    elif layout == "split_screen":
+        half = 1920 // 2  # left/right halves of the 1920x1080 source
+        top = CropKey(t=0.0, x=96, y=0, w=half, h=1080)
+        bottom = CropKey(t=0.0, x=960 + 96, y=0, w=half, h=1080)
+        tracks = [
+            {"role": "top", "keys": [top.model_dump()]},
+            {"role": "bottom", "keys": [bottom.model_dump()]},
+        ]
+    elif layout == "facecam":
+        mkeys = [CropKey(t=0.0, x=(1920 - 606) // 2, y=0, w=606, h=1080)]
+        fkeys = [CropKey(t=0.0, x=100, y=60, w=200, h=200)]
+        tracks = [
+            {"role": "main", "keys": [k.model_dump() for k in mkeys]},
+            {"role": "face", "keys": [k.model_dump() for k in fkeys]},
         ]
     else:  # exact 9:16 fitted into 1920x1080: h=1080 -> w=607.5 -> even 606
         keys = [
@@ -102,6 +121,7 @@ def _layout_artifact(
                     y=0, w=606, h=1080)
             for i in range(25)
         ]
+        tracks = [{"role": "main", "keys": [k.model_dump() for k in keys]}]
     artifact = {
         "schema_version": 1,
         "clip_id": clip_id,
@@ -109,11 +129,12 @@ def _layout_artifact(
         "source_width": 1920,
         "source_height": 1080,
         "native_fps": 30.0,
-        "tracks": [{"role": "main", "keys": [k.model_dump() for k in keys]}],
         "face_track_count": face_track_count,
         "detector": "fixture-face-detector",
         "layout_source": "auto",
     }
+    if with_tracks:
+        artifact["tracks"] = tracks
     return artifact
 
 
@@ -125,10 +146,11 @@ class _RecordingRender:
         self.impl = FixtureRenderAdapter()
 
     def render_mezzanine(self, source, plan, layout, dst, cfg,
-                         native_fps=None):
+                         native_fps=None, tracks=None):
         self.calls.append(("mezzanine", plan.clip_id))
         return self.impl.render_mezzanine(
-            source, plan, layout, dst, cfg, native_fps=native_fps)
+            source, plan, layout, dst, cfg,
+            native_fps=native_fps, tracks=tracks)
 
     def extract_audio(self, source, start_s, end_s, dst):
         self.calls.append(("audio", dst))
@@ -538,10 +560,10 @@ def test_face_track_layout_renders_cleanly(tmp_path):
     assert job_state == "queued"
 
 
-def test_unimplemented_layout_fails_cleanly(tmp_path):
+def test_layout_without_region_tracks_fails_cleanly(tmp_path):
     cfg = _setup(tmp_path)
     artifact = _layout_artifact(f"{JOB_ID}-clip01")
-    artifact["layout"] = "split_screen"
+    artifact["layout"] = "split_screen"  # tracks still only `main`
     (
         _job_dir(cfg) / "clips" / f"{JOB_ID}-clip01" / "layout.json"
     ).write_text(json.dumps(artifact, indent=2) + "\n", encoding="utf-8")
@@ -551,6 +573,29 @@ def test_unimplemented_layout_fails_cleanly(tmp_path):
     stage_state, job_state = _stage_and_job_state(cfg)
     assert stage_state == "failed"
     assert job_state == "failed"
+
+
+@pytest.mark.parametrize("layout", ["split_screen", "facecam"])
+def test_multiregion_layout_renders_with_region_tracks(tmp_path, layout):
+    """M7f stage level: split_screen/facecam layout.json (M6e
+    `RegionTrack`s) render end-to-end (fixture adapter) — the stage
+    forwards `layout_art.tracks` to the adapter."""
+    cfg = _setup(tmp_path)
+    clip_id = f"{JOB_ID}-clip01"
+    artifact = _layout_artifact(clip_id, layout=layout)
+    (
+        _job_dir(cfg) / "clips" / clip_id / "layout.json"
+    ).write_text(json.dumps(artifact, indent=2) + "\n", encoding="utf-8")
+
+    summary = _run(cfg)
+
+    assert summary["skipped"] is False
+    assert summary["clips"][0]["clip_id"] == clip_id
+    files = _clip_files(cfg, clip_id)
+    for expected in (
+            "mezzanine.mp4", "audio.m4a", "captions.ass", "final.mp4",
+            "thumbnail.jpg", "render.json"):
+        assert expected in files
 
 
 def test_render_error_marks_failed_and_job_failed(tmp_path):

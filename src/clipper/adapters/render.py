@@ -1,5 +1,5 @@
 """
-Render adapter (M7b + M7c — docs/spec/m7.md).
+Render adapter (M7b + M7c + M7e + M7f — docs/spec/m7.md).
 
 GPU0 (RTX 2080 Super, `cuda:0`) ONLY for production render: NVDEC decode
 (`-hwaccel cuda`) + NVENC encode (`h264_nvenc`). P100s never do video.
@@ -11,7 +11,21 @@ M7e adds the DYNAMIC `face_track` mezzanine path: a `crop.cmd` sendcmd
 file written BESIDE the mezzanine drives the `crop` filter's x/y per
 clip-relative key (`plan.crop_path`, M6e).
 
-The render STAGE is a LATER M7 milestone — NOT implemented here.
+M7f adds the MULTI-REGION `split_screen` / `facecam` mezzanine paths
+(filter_complex graphs; regions from the M6d/M6e `RegionTrack`s passed
+as `tracks`):
+
+- `split_screen`: two STATIC region crops (`top` / `bottom` tracks,
+  t=0 key), each scaled to 1080x960, `vstack` -> 1080x1920.
+- `facecam`: `main` track scaled to 1080x608 (top band); `face` track
+  aspect-fit into the 1080x1312 bottom band — BLURRED FILL behind when
+  the aspect differs (`scale` cover + `crop` + `boxblur` + `overlay`
+centered); both bands `vstack` -> 1080x1920.
+
+Both keep the M7b scale rules: `scale_cuda` preferred (when the
+`scale_cuda` filter exists), CPU-scale fallback RETAINS `h264_nvenc` +
+logs LOUDLY; `cpu_render` debug path unchanged (the one sanctioned
+libx264).
 
 M7 fixed decisions implemented (docs/spec/m7.md):
 
@@ -58,6 +72,7 @@ from ..models import (
     CropKey,
     Layout,
     MezzanineInfo,
+    RegionTrack,
     RenderArtifact,
 )
 from ..render_paths import CROP_CMD_FILENAME, crop_cmd_from_path
@@ -90,6 +105,152 @@ CAPTION_FONT_NAME = "Montserrat-ExtraBold.ttf"
 FONT_INSTALL_SCRIPT = "bash scripts/install_fonts.sh"
 THUMBNAIL_SS = "1.0"  # thumbnail seek (card: `ffmpeg -ss 1.0 ...`)
 
+# M7f multi-region composite bands (docs/spec/m7.md M7f, 1080-wide
+# output): split_screen = two 1080x960 bands; facecam = a 1080x608
+# main band + a 1080x1312 face band (608 + 1312 = 1920 = out.height).
+SPLIT_REGION_HEIGHT = 960
+FACECAM_MAIN_HEIGHT = 608
+FACECAM_BLUR = "boxblur=8:1.5"  # blurred fill behind the face region
+
+M7F_ROLES: dict[Layout, tuple[str, ...]] = {
+    Layout.split_screen: ("top", "bottom"),
+    Layout.facecam: ("main", "face"),
+}
+
+
+def _region_key(
+    tracks: list[RegionTrack] | None,
+    role: str,
+    layout: Layout,
+) -> CropKey:
+    """The STATIC t=0 key of the `{role}` region track (M7f).
+
+    Clean `MediaError` naming the M6e producer when `tracks` is missing,
+    a role is absent, or the track has no keys (no silent degradation).
+    """
+    if tracks is None:
+        raise MediaError(
+            f"layout {layout.value!r} requires the M6d/M6e region "
+            f"`tracks` (the layout.json `tracks` list) — produced by the "
+            "M6e layout stage (scripts/layout_job.py)"
+        )
+    for track in tracks:
+        if track.role != role:
+            continue
+        if not track.keys:
+            raise MediaError(
+                f"layout {layout.value!r}: the {role!r} region track has "
+                "no keys — produced by the M6e layout stage "
+                "(scripts/layout_job.py)"
+            )
+        return track.keys[0]
+    raise MediaError(
+        f"layout {layout.value!r} requires a {role!r} region track "
+        f"(roles: {'/'.join(M7F_ROLES[layout])}) — produced by the M6e "
+        "layout stage (scripts/layout_job.py)"
+    )
+
+
+def _scale_chain(width: int, height: int, gpu_scale: bool) -> str:
+    """One band's scale step (M7f): `scale_cuda` preferred; the CPU-scale
+    fallback keeps every OTHER step (encode stays `h264_nvenc`; the LOUD
+    warning is logged by `render_mezzanine`, decision 2)."""
+    if gpu_scale:
+        return (
+            f"hwupload_cuda,scale_cuda={width}:{height}:format=nv12,"
+            f"hwdownload_cuda,format=nv12"
+        )
+    return f"scale={width}:{height}:flags=lanczos"
+
+
+def _crop_head(key: CropKey) -> str:
+    return (
+        f"[0:v]crop=w={int(key.w)}:h={int(key.h)}:"
+        f"x={int(key.x)}:y={int(key.y)}"
+    )
+
+
+def split_screen_graph(
+    top: CropKey,
+    bottom: CropKey,
+    width: int,
+    gpu_scale: bool,
+) -> str:
+    """M7f `split_screen` filter_complex graph (docs/spec/m7.md M7f):
+
+    two region crops (M6d/M6e `top`/`bottom` tracks, t=0 static key),
+    each scaled to `{width}xSPLIT_REGION_HEIGHT` (1080x960), `vstack`
+    into the `{width}x1920` mezzanine. Composite (`vstack`) is CPU
+    (decision 3); per-band scaling is CUDA-preferred."""
+    scale = _scale_chain(width, SPLIT_REGION_HEIGHT, gpu_scale)
+
+    def chain(key: CropKey, label: str) -> str:
+        return f"{_crop_head(key)},{scale}[{label}];"
+
+    return (
+        chain(top, "top")
+        + chain(bottom, "bottom")
+        + "[top][bottom]vstack=inputs=2[vout]"
+    )
+
+
+def _fit_into(w: int, h: int, box_w: int, box_h: int) -> tuple[int, int]:
+    """Aspect-PRESERVING fit of a `w`x`h` region into a `box_w`x`box_h`
+    box (M7f facecam face band); dims rounded to even."""
+    if w <= 0 or h <= 0:
+        raise MediaError(
+            f"face region has non-positive dimensions ({w}x{h}) — produced "
+            "by the M6e layout stage (scripts/layout_job.py)"
+        )
+    aspect = w / h
+    if aspect >= box_w / box_h:
+        fit_w, fit_h = float(box_w), box_w / aspect
+    else:
+        fit_w, fit_h = box_h * aspect, float(box_h)
+
+    def even(v: float) -> int:
+        return int(max(2, int(round(v)) // 2 * 2))
+
+    return even(fit_w), even(fit_h)
+
+
+def facecam_graph(
+    main_key: CropKey,
+    face_key: CropKey,
+    width: int,
+    output_height: int,
+    gpu_scale: bool,
+) -> str:
+    """M7f `facecam` filter_complex graph (docs/spec/m7.md M7f):
+
+    `main` track -> content scaled to `{width}x{FACECAM_MAIN_HEIGHT}`
+    (1080x608) TOP band; `face` track -> aspect-fit into the
+    `{width}x({output_height-608})` (1080x1312) bottom band — when the
+    face region's aspect DIFFERS from the band's, a BLURRED FILL
+    (cover `scale` + `crop` + `boxblur`) sits behind the centered
+    `overlay`; the two bands `vstack` into `{width}x{output_height}`."""
+    main_h = FACECAM_MAIN_HEIGHT
+    face_h = output_height - main_h  # 1920 - 608 = 1312
+    fit_w, fit_h = _fit_into(int(face_key.w), int(face_key.h), width, face_h)
+    lines = [
+        f"{_crop_head(main_key)},"
+        f"{_scale_chain(width, main_h, gpu_scale)}[main];",
+        f"{_crop_head(face_key)},"
+        f"{_scale_chain(fit_w, fit_h, gpu_scale)}[face];",
+    ]
+    if int(face_key.w) * face_h == int(face_key.h) * width:
+        # exact band aspect — no blurred fill needed
+        lines.append("[main][face]vstack=inputs=2[vout]")
+    else:
+        lines.append(
+            f"[0:v]scale={width}:{face_h}:"
+            f"force_original_aspect_ratio=increase,crop={width}:{face_h},"
+            f"{FACECAM_BLUR}[bg];"
+            "[bg][face]overlay=(W-w)/2:(H-h)/2[bot];"
+            "[main][bot]vstack=inputs=2[vout]"
+        )
+    return "".join(lines)
+
 
 def _fonts_dir() -> Path:
     """The repo's `assets/fonts` directory (M7a font installer target)."""
@@ -121,13 +282,16 @@ class RenderAdapter(Protocol):
         dst: str,
         cfg: Config,
         native_fps: float | None = None,
+        tracks: list[RegionTrack] | None = None,
     ) -> MezzanineInfo:
         """Render the `[plan.start, plan.end]` window to a 1080x1920
         mezzanine (native fps) and probe the result.
 
         `native_fps` is an optional caller-provided value (judge note,
         docs/spec/m7.md M7b); when `None` the FFmpeg impl probes the
-        source.
+        source. `tracks` (M7f) carries the M6d/M6e `RegionTrack`s for the
+        multi-region layouts (`split_screen`: `top` + `bottom`; `facecam`:
+        `main` + `face`); ignored by `center_crop` / `face_track`.
         """
         ...
 
@@ -259,11 +423,13 @@ class FFmpegRenderAdapter:
         cfg: Config,
         native_fps: float,
         gpu_scale: bool,
+        tracks: list[RegionTrack] | None = None,
     ) -> list[str]:
-        """Exact M7b mezzanine command (docs/spec/m7.md M7b) for ONE path:
+        """Exact M7b/M7e/M7f mezzanine command for ONE path:
 
         - `gpu_scale=True` and not `cpu_render`: `-hwaccel cuda` +
-          `hwupload_cuda,scale_cuda=W:H:format=nv12` + `h264_nvenc`.
+          `hwupload_cuda,scale_cuda=W:H:format=nv12` (or the per-band
+          M7f `scale_cuda` chains) + `h264_nvenc`.
         - `gpu_scale=False` and not `cpu_render`: CPU scale
           `scale=W:H:flags=lanczos`, encode STAYS `h264_nvenc` (loud
           warning is logged by the caller).
@@ -271,27 +437,15 @@ class FFmpegRenderAdapter:
           (explicit DEBUG path only; loudly warned at construction).
 
         `center_crop` (static, M7b) and `face_track` (dynamic sendcmd
-        crop, M7e) are the renderable layouts; `split_screen`/`facecam`
-        are NOT yet implemented (later M7).
+        crop, M7e) render via `-vf`; the MULTI-REGION layouts
+        `split_screen` (two region crops + `vstack`, M7f) and `facecam`
+        (`main` band + blurred-fill fit `face` band + `vstack`, M7f)
+        render via `-filter_complex` (labeled graph) + `-map [vout]`,
+        sourced from the `tracks` region tracks (clean `MediaError`
+        naming the M6e producer when `tracks` is missing or a role is
+        absent).
         """
         resolved = _resolve_layout(layout)
-        if resolved is Layout.center_crop:
-            crop_vf = _CENTER_CROP_VF
-        elif resolved is Layout.face_track:
-            first = self._face_track_first_key(plan)
-            crop_cmd_path = Path(dst).resolve().parent / CROP_CMD_FILENAME
-            crop_vf = (
-                f"sendcmd=f={crop_cmd_path},"
-                f"crop=w={int(first.w)}:h={int(first.h)}:"
-                f"x={int(first.x)}:y={int(first.y)}"
-            )
-        else:
-            raise MediaError(
-                f"layout {resolved.value!r} is not renderable yet — "
-                "center_crop (M7b) and face_track (M7e) are implemented "
-                "(docs/spec/m7.md); split_screen/facecam rendering is a "
-                "later M7 milestone"
-            )
         native = float(native_fps)
         if native <= 0.0:
             raise MediaError(
@@ -300,41 +454,78 @@ class FFmpegRenderAdapter:
             )
         width = int(cfg.render.output_width)
         height = int(cfg.render.output_height)
-        vf = crop_vf
-        if self.cpu_render:
-            vf = f"{vf},scale={width}:{height}:flags=lanczos"
-            cmd: list[str] = [
-                "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
-                "-ss", f"{plan.start:.3f}",
-                "-to", f"{plan.end:.3f}",
-                "-i", source,
-                "-vf", vf,
-                "-an",
-                "-c:v", "libx264", "-preset", "medium",
-                "-crf", str(int(cfg.render.crf)),
-                "-r", f"{native:g}",
-                dst,
-            ]
-            return cmd
-        if gpu_scale:
-            vf = f"{vf},hwupload_cuda,scale_cuda={width}:{height}:format=nv12"
-        else:
-            vf = f"{vf},scale={width}:{height}:flags=lanczos"
-        cmd = [
-            "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
-            "-hwaccel", "cuda",
+
+        graph: str | None = None
+        if resolved is Layout.split_screen:
+            graph = split_screen_graph(
+                _region_key(tracks, "top", resolved),
+                _region_key(tracks, "bottom", resolved),
+                width, gpu_scale,
+            )
+        elif resolved is Layout.facecam:
+            graph = facecam_graph(
+                _region_key(tracks, "main", resolved),
+                _region_key(tracks, "face", resolved),
+                width, height, gpu_scale,
+            )
+
+        vf: str | None = None
+        if graph is None:
+            if resolved is Layout.center_crop:
+                crop_vf = _CENTER_CROP_VF
+            elif resolved is Layout.face_track:
+                first = self._face_track_first_key(plan)
+                crop_cmd_path = Path(dst).resolve().parent / CROP_CMD_FILENAME
+                crop_vf = (
+                    f"sendcmd=f={crop_cmd_path},"
+                    f"crop=w={int(first.w)}:h={int(first.h)}:"
+                    f"x={int(first.x)}:y={int(first.y)}"
+                )
+            else:  # unreachable (all Layout members handled above)
+                raise MediaError(
+                    f"layout {resolved.value!r} is not renderable — "
+                    "expected one of center_crop/face_track/"
+                    "split_screen/facecam"
+                )
+            vf = crop_vf
+            if self.cpu_render:
+                vf = f"{vf},scale={width}:{height}:flags=lanczos"
+            elif gpu_scale:
+                vf = (
+                    f"{vf},"
+                    f"hwupload_cuda,scale_cuda={width}:{height}:format=nv12"
+                )
+            else:
+                vf = f"{vf},scale={width}:{height}:flags=lanczos"
+
+        cmd: list[str] = ["ffmpeg", "-hide_banner", "-loglevel", "error", "-y"]
+        if not self.cpu_render and gpu_scale:
+            # NVDEC (`-hwaccel cuda`) only on the GPU-decode path; the
+            # CPU-scale fallback drops it (docs/spec/m7.md M7b) and the
+            # explicit `cpu_render` debug path never has it.
+            cmd += ["-hwaccel", "cuda"]
+        cmd += [
             "-ss", f"{plan.start:.3f}",
             "-to", f"{plan.end:.3f}",
             "-i", source,
-            "-vf", vf,
-            "-an",
-            "-c:v", "h264_nvenc",
-            "-preset", str(cfg.render.nvenc_preset),
-            "-rc", "vbr",
-            "-cq", str(int(cfg.render.mezz_cq)),
-            "-r", f"{native:g}",
-            dst,
         ]
+        if vf is not None:
+            cmd += ["-vf", vf, "-an"]
+        else:
+            cmd += ["-filter_complex", graph or "", "-map", "[vout]", "-an"]
+        if self.cpu_render:
+            cmd += [
+                "-c:v", "libx264", "-preset", "medium",
+                "-crf", str(int(cfg.render.crf)),
+            ]
+        else:
+            cmd += [
+                "-c:v", "h264_nvenc",
+                "-preset", str(cfg.render.nvenc_preset),
+                "-rc", "vbr",
+                "-cq", str(int(cfg.render.mezz_cq)),
+            ]
+        cmd += ["-r", f"{native:g}", dst]
         return cmd
 
     def audio_command(
@@ -424,11 +615,21 @@ class FFmpegRenderAdapter:
         dst: str,
         cfg: Config,
         native_fps: float | None = None,
+        tracks: list[RegionTrack] | None = None,
     ) -> MezzanineInfo:
-        """Render one clip's mezzanine (center_crop static path, M7b)."""
+        """Render one clip's mezzanine.
+
+        - `center_crop` static path (M7b, `faces == 0` ok)
+        - `face_track` dynamic sendcmd crop path (M7e)
+        - `split_screen` / `facecam` multi-region composites (M7f) —
+          the region tracks MUST be the M6d/M6e `RegionTrack`s (`tracks`
+          kwarg); a missing track/role fails CLEANLY (no silent render).
+        """
         if not os.path.exists(source):
             raise MediaError(f"Source file does not exist: {source}")
         resolved = _resolve_layout(layout)
+        if resolved in M7F_ROLES and tracks is None:
+            _region_key(None, M7F_ROLES[resolved][0], resolved)
         if native_fps is None:
             native_fps = self._media.probe(source).fps
         if resolved is Layout.face_track:
@@ -442,7 +643,8 @@ class FFmpegRenderAdapter:
         if resolved is Layout.face_track:
             self._write_crop_cmd(dst, plan.crop_path, float(native_fps))
         self._run_ffmpeg(self.mezzanine_command(
-            source, plan, layout, dst, cfg, native_fps, gpu_scale
+            source, plan, layout, dst, cfg, native_fps, gpu_scale,
+            tracks,
         ))
         probe = self._media.probe(dst)
         return MezzanineInfo(
@@ -632,15 +834,24 @@ class FixtureRenderAdapter:
         dst: str,
         cfg: Config,
         native_fps: float | None = None,
+        tracks: list[RegionTrack] | None = None,
     ) -> MezzanineInfo:
         resolved = _resolve_layout(layout)
         if resolved is not Layout.center_crop and \
-                resolved is not Layout.face_track:
+                resolved is not Layout.face_track and \
+                resolved not in M7F_ROLES:
             raise MediaError(
                 f"layout {resolved.value!r} is not renderable yet — only "
-                "the center_crop static path (M7b) and the face_track "
-                "dynamic path (M7e) are implemented (docs/spec/m7.md)"
+                "the center_crop static path (M7b), the face_track "
+                "dynamic path (M7e) and the split_screen/facecam "
+                "multi-region paths (M7f) are implemented "
+                "(docs/spec/m7.md)"
             )
+        if resolved in M7F_ROLES:
+            # Same guards as the FFmpeg path (clean MediaError naming
+            # the missing role + M6e producer).
+            for role in M7F_ROLES[resolved]:
+                _region_key(tracks, role, resolved)
         Path(dst).parent.mkdir(parents=True, exist_ok=True)
         if resolved is Layout.face_track:
             if not plan.crop_path:

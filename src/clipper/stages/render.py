@@ -269,6 +269,7 @@ def _process_clip(
         str(clip_dir / _MEZZANINE_FILE),
         cfg,
         native_fps=probe.fps,
+        tracks=layout_art.tracks,
     )
     audio = render.extract_audio(
         source_path, plan.start, plan.end, str(clip_dir / _AUDIO_FILE)
