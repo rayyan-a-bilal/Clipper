@@ -18,9 +18,9 @@ The project root is **`/home/rbilal/clipper`**. (It is NOT `/home/clipper` — t
 
 - Project root: `/home/rbilal/clipper`
 - Docs root: `/home/rbilal/clipper/docs`
-- Milestone/spec docs: `/home/rbilal/clipper/docs/spec/*.md` (milestones.md, m2.md, m3.md, m4.md, m5.md, llm.md, contracts.md, scoring_prompt.md, m5c_status.md)
+- Milestone/spec docs: `/home/rbilal/clipper/docs/spec/*.md` (milestones.md, m2.md, m3.md, m4.md, m5.md, m5c_status.md, m6.md, m7.md, m8.md, llm.md, contracts.md, scoring_prompt.md, pipeline.md)
 - Source: `/home/rbilal/clipper/src/clipper` (contracts in `models/`, I/O in `adapters/`, stages in `stages/`)
-- Stage runners: `/home/rbilal/clipper/scripts/` (analyze_job.py, candidates_job.py, transcribe_job.py, score_job.py, select_job.py, layout_job.py, llm_preflight.py; `scripts/cuda_env.sh` must be sourced before `layout_job.py`)
+- Stage runners: `/home/rbilal/clipper/scripts/`: `ingest_job.py`, `transcribe_job.py`, `analyze_job.py`, `candidates_job.py`, `score_job.py [--mock]`, `select_job.py [--no-llm|--mock]`, `layout_job.py [--clip --layout --score-threshold --cpu-faces]`, `render_job.py [--clip --cpu-render]`; MANUAL (GPU0 free + PI stopped): `bench_m6.py`, `bench_m7.py`, `faces_preflight.py`, `render_preflight.py`, `llm_preflight.py`; installers (manual, never in tests): `install_models.sh`, `install_fonts.sh`. `scripts/cuda_env.sh` must be sourced before `layout_job.py` and any GPU video run.
 - Tests: `/home/rbilal/clipper/tests`
 - DB: `data/clipper.db` (SQLite WAL); job artifacts under `data/jobs/<job_id>/`
 - Venv: `/home/rbilal/clipper/.venv`
@@ -46,9 +46,9 @@ The project root is **`/home/rbilal/clipper`**. (It is NOT `/home/clipper` — t
 ## Milestone map
 - M0–M4: scaffold/ingest/transcribe/analyze/candidates
 - M5: LLM scoring — M5a runtime/client/contracts, M5b scoring stage, M5c selection+cuts+metadata
-- M6: GPU face analysis, layout decision, crop path (fills `layout`/`crop_path` in draft ClipPlans)
-- M7: GPU render (NVDEC/NVENC), captions, hook overlay
-- M8: worker orchestration (one job at a time in v1)
+- M6: GPU face analysis, tracking, layout decision, crop path (fills `layout`/`crop_path` in draft ClipPlans). COMPLETE incl. M6f (`face_follow`) + M6g (`bridge_tracks`).
+- M7: GPU render (NVDEC/NVENC), captions, hook overlay. COMPLETE (M7a–M7f) + M7g/M7h caption fixes. Residual: pasted bench_proof from `bench_m7.py`.
+- M8: worker orchestration, one job at a time. **M8a DONE** (spec `docs/spec/m8.md`: 9 coarse stages in `worker_plan.STAGE_PLAN` — prep→transcribe→analyze→candidates→scoring→selection→clip_plans→layout→render; coarse skip only when all required fine stages are done + artifacts exist + `schema_version==1`; job states `queued→running→awaiting_qc` (≥1 clip) / `done` (zero clips, valid) / `failed`; retry ONLY via explicit `--retry` = `db.reset_failed_stages`; per-job `report.json` = `JobReport` schema_version=1 + `job_reports` table (migration v3); contracts in `models/worker_artifacts.py`; pure `worker_plan.py`; additive `db.py` helpers; M8 never touches Ollama 11434, LLM stages reuse `managed_ollama`). **M8 NEXT = worker loop** (+ CLI `run`/`status`, `report.json` file write). No concurrency, no watch folder, no systemd until the card says so.
 - M9: QC **dashboard** hosted on the Linux server (FastAPI/Jinja2/HTMX per config/docs) — the user operates the pipeline from a browser: toggles for face tracking, captions on/off, placement/margins, thresholds, explicit layout choice.
 - M10: posting outbox
 
@@ -64,19 +64,38 @@ The user reviewed real clips (job `7d187d98…`, TED-stage footage `test_media/t
    - plumbable as a pure function argument so the UI/stage API can pass overrides without new code paths.
    Do NOT hardcode behavior constants into stages/adapters. Tests stay CPU-only via fixtures.
 4. **Spec-before-code.** Behavior/constant changes to completed milestones (M6d pan law, M7a caption format, thresholds) require a dated decision entry in the relevant `docs/spec/m#.md` (new decision number, old values recorded) BEFORE the code change; mirror contract changes in `docs/spec/contracts.md`; update `AGENTS.md` + `milestones.md`.
-5. **Diagnosis evidence.** When a stage "fell back" or "found 0 faces", check the artifact metadata first (`layout.json`: `layout`, `face_track_count`, `layout_source`), then probe the raw detector scores on the actual frames (CPU ORT or `Cv2CpuFaceDetector` debug path) before touching thresholds. Note: `cv2.FaceDetectorYN` returns a `cv2.Mat`, NOT a `numpy.ndarray` — `isinstance(r, np.ndarray)` is the wrong emptiness check (returned -1 int = no faces).
-6. **Known-good facts (2026-11-25):** YuNet model `data/models/yunet.onnx` is byte-identical to official OpenCV Zoo (md5 `4ae92eeb150c82ce15ac80738b3b8167`). ffmpeg here is 4.4.2: `scale_cuda` has NO `format` AVOption — do not add `:format=nv12` back. ASS events MUST start with uppercase `Dialogue:` (libass silently drops `dialogue:` lines — this was the M7 caption bug).
+5. **Diagnosis evidence.** When a stage "fell back" or "found 0 faces", check the artifact metadata first (`layout.json`: `layout`, `face_track_count`, `layout_source`, `dominant_persistence`), then probe the raw detector scores on the actual frames (CPU ORT or `Cv2CpuFaceDetector` debug path) before touching thresholds. Note: `cv2.FaceDetectorYN` returns a `cv2.Mat`, NOT a `numpy.ndarray` — `isinstance(r, np.ndarray)` is the wrong emptiness check (returned -1 int = no faces).
+6. **Karaoke (M7h lesson):** ASS format tags do NOT consume text — never duplicate the word around `\kf` (doubled subtitles, e.g. `Oh,Oh, there'sthere's`). `\c` color overrides do NOT recolor `\kf` karaoke parts (unsung falls back to the style SecondaryColour — that's why the old inline-`\c` form rendered RED, not yellow). Correct form: emit each word ONCE as `{\kf<cs>}<word>`; karaoke colors live in the Caption STYLE: `PrimaryColour=&HFFFFFF&` (sung white), `SecondaryColour=&H00FFFF&` (unsung yellow).
+7. **Render assay rule (M7g/M7h pattern):** before/after ANY caption or ASS change, burn the ASS onto a solid `testsrc`/grey 1080x1920 frame with the real ffmpeg+libass and measure/eyeball (the mock-subprocess tests assert command strings, not pixels — both M7g and M7h bugs were invisible to them).
+8. **Known-good facts (2026-11-25):** YuNet model `data/models/yunet.onnx` is byte-identical to official OpenCV Zoo (md5 `4ae92eeb150c82ce15ac80738b3b8167`). ffmpeg here is 4.4.2: `scale_cuda` has NO `format` AVOption — do not add `:format=nv12` back. ASS events MUST start with uppercase `Dialogue:` (libass silently drops `dialogue:` lines — this was the M7 caption bug).
 
 ## Session pattern for behavior changes (use for any new knob/fix)
 1. Startup ritual (below) → `git status` → named branch.
-2. If touching a completed milestone's contract/constants: spec decision entry FIRST, record old values.
-3. Pure-logic changes (`layouts.py`, `captions.py`, `tracking.py`) stay I/O-free and fixture-tested.
+2. If touching a completed milestone's contract/constants: spec decision entry FIRST, record old values (M6f/M6g/M7h all followed this).
+3. Pure-logic changes (`layouts.py`, `captions.py`, `tracking.py`) stay I/O-free and fixture-tested; caption/ASS changes additionally get the render assay above.
 4. New user-facing knobs: `config.py` default + `config.yaml` entry + (when per-clip relevant) the override parameter threaded through the stage's public function (existing pattern: `forced_layout`, `frame_reader`, `clip_id`).
 5. Acceptance commands pass (venv, paste outputs), ruff clean, AGENTS.md + milestones.md updated, committed on the branch. STOP at the milestone boundary.
 
 **Stale-map warning:** the old "Future Milestones" block in `AGENTS.md` (M6=quality gate, M7=cut refinement, M8=reframe, M9=captions, M10=QC+outbox) is a SUPERSEDED plan — selection/cut refinement was absorbed into M5c, and M9 is a DASHBOARD (see direction rules above), not "QC+outbox". `docs/spec/milestones.md` mixes old and new entries; trust the milestone specs + the task card over any conflicting list. `config.yaml` has `faces:`, `captions:`, `render:` blocks (1080x1920, crf 14, `h264_nvenc`).
 
-**Status at 2026-11-25:** M0–M5c, M6 (a–e), M7a–M7f DONE (first real GPU render + bench proof exist). Open work agreed with the user: (a) caption `Dialogue:` case fix [M7 bug fix], (b) face-stabilized center crop (follow mode — M6 spec delta), (c) dashboard/config surface groundwork (per-clip `options.json` + CLI flags).
+**Status at 2026-11-25 (historical, superseded by the Status section below):** M0–M5c, M6 (a–e), M7a–M7f DONE (first real GPU render + bench proof exist). Open work agreed with the user: (a) caption `Dialogue:` case fix [M7 bug fix — DONE, M7g], (b) face-stabilized center crop (follow mode — DONE, M6f), (c) dashboard/config surface groundwork [now covered by M8a/M8b + M9].
+
+## Status (updated after M7 verification + M7h/M6g fixes + M8a)
+- **M0–M7 COMPLETE** (incl. M6f `face_follow`, M6g track bridging, M7g `Dialogue:` case fix, M7h karaoke double-copy fix) and **M8a COMPLETE** (`StageReport`/`JobReport` contracts, pure `STAGE_PLAN`, DB helpers + migration v3 — 611 CPU tests green, `pytest -m "not gpu"` → 611 passed + 1 GPU oracle deselected, ruff clean). Full history: `AGENTS.md` tail.
+- **Next: M8b** — the worker loop (orchestrate the 9 coarse stages over the oldest `queued` job, write `report.json`, CLI `run`/`status`). Spec: `docs/spec/m8.md`. Then M9 (QC dashboard) / M10 (posting). Git tree is clean on `main`; latest tip `18c57f2` (M8a). Branch precedent: work commits land on long-lived feature tips (e.g. `m7-caption-fix-tracking-debug`, `m8a-stage-plan`) then surface in `main` — when a card says "branch from main", branch from the actual latest tip and flag it.
+
+## Layouts and tracking (M6f/M6g — do not regress)
+- Layout precedence: `facecam > split_screen > face_track (≥0.6 persistence) > face_follow > center_crop` (`layouts.decide_layout`).
+- `face_follow` (M6f): the face-stabilized zoom — same dynamic sendcmd+`crop` mezzanine path as `face_track` (`DYNAMIC_CROP_LAYOUTS` shares both), milder pan law `FOLLOW_EMA_TAU_S=0.5` / `FOLLOW_DEAD_ZONE=0.10` / `FOLLOW_MAX_PAN_FRAC_PER_S=0.40` (face_track keeps M6d: 0.8/0.20/0.30). Faceless `face_follow` → STATIC centered window, never raises. Knobs: `faces.face_follow_enabled` (default true), `faces.follow_persistence_min` (default 0.3) — both config + per-run, dashboard-ready.
+- **Detection bar is global 0.6; per-run override is `scripts/layout_job.py --score-threshold`** (applied to `cfg.faces` before `get_face_detector`). The TED review footage needs `--score-threshold 0.5` (YuNet best score/frame ~0.50 there).
+- Tracking flow: `associate(greedy-IoU, max_gap_frames=3)` → **`bridge_tracks` (M6g: merges segments with gap ≤ 1.0s and centroid dist ≤ 0.30 — spotty-but-real detections become one track, so `face_track` ≥ 0.6 fires where only `face_follow` did)** → `summarize` (fills `dominant_persistence`) → `build_tracks`.
+- Diagnosing a bad crop/track: first read the per-clip `layout.json` (`layout`, `layout_source`, `face_track_count`, tracks), then probe raw detector scores on the actual `vision.mp4` frames, before touching any threshold.
+
+## Pending manual GPU verifications (user or supervised session: GPU0 free + PI agent stopped)
+1. `cd /home/rbilal/clipper && source .venv/bin/activate && source scripts/cuda_env.sh && python scripts/layout_job.py 7d187d989c2b453f838048b1aa2d1155 --score-threshold 0.5` → expect `layout: face_track` (bridged persistence ≥ 0.6) or `face_follow`, `face_track_count ≥ 1`
+2. `python scripts/render_job.py 7d187d989c2b453f838048b1aa2d1155` → regenerates captions (old `data/jobs/…/clips/…/captions.ass` still render doubled/stale until re-rendered)
+3. Bench proofs still owed: `python scripts/bench_m6.py <job_id>` (paste into AGENTS.md M6e entry) and `python scripts/bench_m7.py <job_id>` (paste into M7f entry — expected: `peak_gpu0_util > 0`, `nvenc_session_seen: true`, `encoder=h264_nvenc`)
+- The user's review job is `7d187d989c2b453f838048b1aa2d1155` (TED-stage, `test_media/ted/ted_x.mp4`) — low-confidence faces (~0.5) are normal there.
 
 ## Hardware
 - GPU0: RTX 2080 Super — media only (Whisper ASR, NVDEC/NVENC, M6/M7 video work)
@@ -89,7 +108,7 @@ The user reviewed real clips (job `7d187d98…`, TED-stage footage `test_media/t
 ## Ollama topology — do not modify the user's service
 - Coding agent LLM: Qwen 3.8:27B on the user's existing Ollama `127.0.0.1:11434`, multi-GPU. NEVER change that service, its env, or systemd config (`deploy/*.service` files are reference only — no systemd changes).
 - M5 runtime: clipper spawns its own **ephemeral** `ollama serve` on `127.0.0.1:11435` with `CUDA_VISIBLE_DEVICES=1`, reusing the existing model store; `managed_ollama(cfg)` always tears it down (process group, SIGTERM→SIGKILL→port release) on success AND failure. Never restart per clip; `num_ctx` is per request.
-- M5 model/options: `gemma4:12b`, `num_ctx=16384`, `num_batch=256`, `temperature=0.1`, `num_predict=1024`, `timeout_s=300`, `batch_size=5`, `max_batch_tokens=6000`, context ±10s.
+- M5 model/options: `gemma4:12b`, `num_ctx=16384`, `num_batch=256`, `temperature=0.1`, `num_predict=2048` (M5a fix: was 1024 — gemma4:12b is a thinking model; client also sends `think=false`, else hidden reasoning eats the whole budget and content comes back empty), `timeout_s=300`, `batch_size=5`, `max_batch_tokens=6000`, context ±10s.
 - Tests use MockLLM / monkeypatched factories (`get_llm_client`, `get_adapter`, `get_scene_adapter`) — no network, no GPU, no nvidia-smi.
 
 ## Environment gotchas (learned the hard way — do not regress)
@@ -98,6 +117,8 @@ The user reviewed real clips (job `7d187d98…`, TED-stage footage `test_media/t
 - `adapters/scenes.py` does lazy `scenedetect`/`cv2` imports inside `detect_shots()` so imports stay light.
 - `data.json`/artifacts are written in canonical form `model_dump_json(indent=2)` + newline; golden fixtures (`tests/fixtures/m4/candidates.json`) must stay byte-identical.
 - **Always `source scripts/cuda_env.sh` before running `scripts/layout_job.py`** (the GPU/onnxruntime-gpu M6 layout job). The system has no CUDA toolkit/cuDNN (no sudo); `cuda_env.sh` points `LD_LIBRARY_PATH` at the user-local cuBLAS 13 + cuDNN 9 pip libs and pins `CUDA_VISIBLE_DEVICES` to GPU0 (2080 Super, cc 7.5 — the only GPU onnxruntime 1.32's CUDA EP supports). Without it the run fails to find cuBLAS/cuDNN. Correct form: `source scripts/cuda_env.sh && python scripts/layout_job.py <job_id>`.
+
+- Full suite is ~7 min wall on this host (600+ tests, slow fixtures) — not a hang; don't kill a run in the first minutes.
 
 ## Acceptance commands — always in venv
 ```bash
@@ -170,5 +191,6 @@ Update AGENTS.md progress. Paste outputs. STOP after <milestone>.
 - Acceptance commands pass in the venv (test count + ruff pasted as proof)
 - New/changed constants recorded in the milestone spec; contracts mirrored in `docs/spec/contracts.md` where applicable
 - `AGENTS.md` progress updated + `docs/spec/milestones.md` status line updated
+- **This skill (`SKILL.md`) updated if anything long-lived changed** (status, scripts, layouts, known-good facts) — and note: if `AGENTS.md`'s tail is dated later than this skill, `AGENTS.md` + the specs win over this skill; fix this skill during the session
 - Scope respected (no next-milestone work); work committed on the task's branch
 - Zero GPU/network requirements in any new test
