@@ -163,3 +163,5 @@ from .vision_artifacts import ClipLayoutArtifact as ClipLayoutArtifact  # noqa: 
 from .vision_artifacts import FaceDetection as FaceDetection  # noqa: E402
 from .vision_artifacts import RegionTrack as RegionTrack  # noqa: E402
 from .vision_artifacts import VisionSegmentInfo as VisionSegmentInfo  # noqa: E402
+from .worker_artifacts import JobReport as JobReport  # noqa: E402
+from .worker_artifacts import StageReport as StageReport  # noqa: E402

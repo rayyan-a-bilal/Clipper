@@ -7,6 +7,7 @@ from datetime import datetime
 from typing import Any
 
 from .config import Config
+from .models import JobReport
 
 
 class Database:
@@ -130,6 +131,22 @@ class Database:
                 self.set_schema_version(2)
             except Exception:
                 # Migration already applied or failed, check
+                pass
+
+        # Migration v3: per-job worker report table (M8a, docs/spec/m8.md)
+        if version < 3:
+            try:
+                cursor.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS job_reports (
+                        job_id TEXT PRIMARY KEY,
+                        report_json TEXT,
+                        updated_at TEXT
+                    )
+                    """
+                )
+                self.set_schema_version(3)
+            except Exception:
                 pass
 
     def get_schema_version(self) -> int | None:
@@ -389,3 +406,149 @@ class Database:
             return False
         finally:
             conn.close()
+
+
+# ---------------------------------------------------------------------------
+# M8a worker helpers (module-level, take an open connection — used by the
+# M8 worker layer; see docs/spec/m8.md). Additive: the Database class and
+# its migrations above are untouched.
+# ---------------------------------------------------------------------------
+
+
+def _now_iso() -> str:
+    return datetime.now().isoformat()
+
+
+def get_job(conn: sqlite3.Connection, job_id: str) -> dict[str, Any] | None:
+    """Return one job row as a dict, or None when the job is unknown."""
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM jobs WHERE job_id = ?", (job_id,))
+    row = cursor.fetchone()
+    return dict(row) if row else None
+
+
+def list_jobs(
+    conn: sqlite3.Connection, state: str | None = None
+) -> list[dict[str, Any]]:
+    """List jobs (oldest first); optionally filter by `state`."""
+    cursor = conn.cursor()
+    if state is None:
+        cursor.execute("SELECT * FROM jobs ORDER BY created_at ASC, job_id ASC")
+    else:
+        cursor.execute(
+            "SELECT * FROM jobs WHERE state = ? "
+            "ORDER BY created_at ASC, job_id ASC",
+            (state,),
+        )
+    return [dict(row) for row in cursor.fetchall()]
+
+
+def next_queued_job(conn: sqlite3.Connection) -> dict[str, Any] | None:
+    """The oldest `queued` job (one job at a time — M8), or None."""
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT * FROM jobs WHERE state = 'queued' "
+        "ORDER BY created_at ASC, job_id ASC LIMIT 1"
+    )
+    row = cursor.fetchone()
+    return dict(row) if row else None
+
+
+def set_job_state(
+    conn: sqlite3.Connection, job_id: str, state: str
+) -> None:
+    """Set a job's state (queued/running/awaiting_qc/done/failed)."""
+    conn.execute(
+        "UPDATE jobs SET state = ?, updated_at = ? WHERE job_id = ?",
+        (state, _now_iso(), job_id),
+    )
+    conn.commit()
+
+
+def set_stage_state(
+    conn: sqlite3.Connection,
+    job_id: str,
+    name: str,
+    state: str,
+    artifact_path: str | None = None,
+    error: str | None = None,
+) -> None:
+    """Upsert a fine-grained stage row.
+
+    - `state == "running"`: starts the stage (`started_at` set once and
+      kept on re-entry), clears `finished_at`/`error`.
+    - `state in {"done", "completed"}` (M1/M2 use `completed`): stamps
+      `finished_at`, stores `artifact_path` when given.
+    - `state == "failed"`: stamps `finished_at`, stores `error`.
+    - `state == "pending"`: a clean pending row (all fields reset).
+    Omitted `artifact_path`/`error` keep (or clear) the previous values;
+    calling it twice with the same arguments is idempotent.
+    """
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT started_at, finished_at, artifact_path FROM stages "
+        "WHERE job_id = ? AND name = ?",
+        (job_id, name),
+    )
+    row = cursor.fetchone()
+    prev_started = row[0] if row else None
+    prev_artifact = row[2] if row else None
+
+    now = _now_iso()
+    if state == "running":
+        started_at, finished_at = (prev_started or now), None
+        artifact, error = artifact_path or prev_artifact, None
+    elif state in ("done", "completed", "failed"):
+        started_at, finished_at = prev_started, now
+        if state == "failed":
+            artifact, error = None, error
+        else:
+            artifact, error = artifact_path or prev_artifact, None
+    else:  # "pending" — clean reset
+        started_at, finished_at, artifact, error = None, None, None, None
+
+    cursor.execute(
+        "INSERT OR REPLACE INTO stages "
+        "(job_id, name, state, artifact_path, error, started_at, finished_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (job_id, name, state, artifact, error, started_at, finished_at),
+    )
+    conn.commit()
+
+
+def reset_failed_stages(conn: sqlite3.Connection, job_id: str) -> int:
+    """Reset this job's `failed` stage rows to `pending` (M8 `--retry`).
+
+    Only `failed` rows are touched; `done`/`completed`/`running`/`
+    pending` rows are left as-is. Returns the number of rows reset.
+    """
+    cursor = conn.cursor()
+    cursor.execute(
+        "UPDATE stages "
+        "SET state = 'pending', artifact_path = NULL, error = NULL, "
+        "started_at = NULL, finished_at = NULL "
+        "WHERE job_id = ? AND state = 'failed'",
+        (job_id,),
+    )
+    conn.commit()
+    return cursor.rowcount
+
+
+def write_job_report(
+    conn: sqlite3.Connection, job_id: str, report: JobReport
+) -> str:
+    """Persist a `JobReport` (canonical `indent=2` JSON) for one job.
+
+    Upserts the `job_reports` table (migration v3) and returns the
+    JSON string the M8 worker also writes to `data/jobs/<job_id>/
+    report.json` (M8a judgment note — the file write itself belongs
+    to the worker loop, not to the DB layer).
+    """
+    report_json = report.model_dump_json(indent=2)
+    conn.execute(
+        "INSERT OR REPLACE INTO job_reports (job_id, report_json, updated_at) "
+        "VALUES (?, ?, ?)",
+        (job_id, report_json, _now_iso()),
+    )
+    conn.commit()
+    return report_json

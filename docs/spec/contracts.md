@@ -217,3 +217,32 @@ facecam
     "dominant_persistence": float                # M6f — dominant track's persistence (0.0 empty); drives face_follow auto-selection
 }
 ```
+
+## M8a — worker report contracts (`models/worker_artifacts.py`, see `docs/spec/m8.md`)
+
+```python
+# StageReport — one coarse worker stage inside a JobReport. Embedded
+# sub-record: NO schema_version of its own (M8a-J4; the JobReport is the
+# versioned contract).
+{
+    "name": str,                      # coarse stage (prep, transcribe, ...)
+    "required": list[str],            # fine-grained DB stages it orchestrates
+    "state": str,                     # pending, running, done, skipped, failed
+    "started_at": Optional[str],      # ISO-8601
+    "finished_at": Optional[str],     # ISO-8601
+    "artifact_paths": list[str],
+    "error": Optional[str]
+}
+
+# JobReport — per-job report.json record (data/jobs/<job_id>/report.json),
+# also persisted in the job_reports table (migration v3, db.write_job_report).
+{
+    "schema_version": 1,
+    "job_id": str,
+    "state": str,                     # queued, running, awaiting_qc, done, failed
+    "clip_count": int,
+    "stages": list[StageReport],
+    "started_at": Optional[str],
+    "finished_at": Optional[str],
+    "error": Optional[str]
+}
