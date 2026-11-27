@@ -442,10 +442,29 @@ def test_config_m6a_defaults_still_present():
 
 
 def test_module_import_never_pulls_onnxruntime():
-    mods = ["clipper.adapters", "clipper.adapters.faces", "clipper.facedec"]
-    for m in mods:
-        sys.modules.pop(m, None)
-    importlib.import_module("clipper.adapters.faces")
+    """A fresh import of ``clipper.adapters.faces`` must not load onnxruntime.
+
+    Pop ONLY the leaf modules under test (never the ``clipper.adapters``
+    parent package — re-importing it would re-run __init__.py and leave the
+    fresh package object without its ``.media``/``.llm``/... attribute
+    bindings, breaking later string-targeted monkeypatches) and restore the
+    prior leaf module objects afterwards. See
+    docs/spec/cards/m5-faces-import-hygiene-test.md.
+    """
+    if "onnxruntime" in sys.modules:
+        pytest.skip(
+            "onnxruntime already imported by an earlier test; "
+            "cannot verify import hygiene",
+        )
+    saved = {
+        name: sys.modules.pop(name)
+        for name in ("clipper.adapters.faces", "clipper.facedec")
+        if name in sys.modules
+    }
+    try:
+        importlib.import_module("clipper.adapters.faces")
+    finally:
+        sys.modules.update(saved)
     assert "onnxruntime" not in sys.modules
 
 
