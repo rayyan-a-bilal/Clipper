@@ -171,16 +171,16 @@ def db_get_job(config: Config, job_id: str) -> dict | None:
 
 
 def _stage_runners(cfg: Config) -> dict[str, worker.StageRunner]:
-    """The real M1–M7 stage wiring for `clipper run`.
+    """The REAL M1–M7 stage wiring for `clipper run` (M8c).
 
-    M8b ships the worker loop with INJECTED runners only (task card:
-    "run uses FakeStageRunner only in tests; real wiring comes M8c").
-    This is the single hook M8c fills in.
+    Returns `clipper.worker_stages.STAGE_RUNNERS` — one real runner per
+    coarse stage, keyed by the exact `worker_plan.STAGE_PLAN` names
+    (validated by `worker._runners_for`). Tests may still monkeypatch
+    this hook to inject fake runners.
     """
-    raise worker.WorkerError(
-        "stage wiring is not available yet (lands in M8c); "
-        "the real M1-M7 stages are not wired to the worker loop in M8b"
-    )
+    from . import worker_stages
+
+    return worker_stages.STAGE_RUNNERS
 
 
 def _print_report_summary(job_id: str, cfg: Config) -> None:
