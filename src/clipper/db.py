@@ -99,8 +99,9 @@ class Database:
             )
         """)
 
-        # Enable WAL mode
-        cursor.execute("PRAGMA journal_mode=WAL")
+        # Enable WAL mode (fetch the single result row so the statement is
+        # complete — an unfetched statement blocks the final commit)
+        cursor.execute("PRAGMA journal_mode=WAL").fetchone()
 
         # Check migration version and apply updates if needed
         self._apply_migrations(conn)
@@ -128,10 +129,13 @@ class Database:
                     "CREATE UNIQUE INDEX IF NOT EXISTS idx_jobs_content_hash "
                     "ON jobs(content_hash)"
                 )
-                self.set_schema_version(2)
             except Exception:
-                # Migration already applied or failed, check
+                # Column/index already present (e.g. DB built by the old
+                # buggy init) — the v2 change is effectively applied.
                 pass
+            # Record on THIS connection: no second writer, no WAL busy
+            # timeout (docs/spec/cards/m0-db-init-timeout.md).
+            self._record_schema_version(cursor, 2)
 
         # Migration v3: per-job worker report table (M8a, docs/spec/m8.md)
         if version < 3:
@@ -145,9 +149,22 @@ class Database:
                     )
                     """
                 )
-                self.set_schema_version(3)
             except Exception:
                 pass
+            self._record_schema_version(cursor, 3)
+
+    def _record_schema_version(self, cursor, version: int) -> None:
+        """Record a migration on the caller's open cursor/connection.
+
+        ``init_db`` commits schema + version rows together at the end, so
+        no second connection (and no WAL write-lock contention) is ever
+        needed — see docs/spec/cards/m0-db-init-timeout.md.
+        """
+        cursor.execute(
+            "INSERT OR REPLACE INTO schema_migrations "
+            "(version, applied_at) VALUES (?, ?)",
+            (version, datetime.now().isoformat())
+        )
 
     def get_schema_version(self) -> int | None:
         """Get current schema version."""
@@ -163,7 +180,11 @@ class Database:
             conn.close()
 
     def set_schema_version(self, version: int):
-        """Set current schema version."""
+        """Set current schema version.
+
+        Kept for API stability; ``init_db`` records migrations on its own
+        connection (see ``_record_schema_version``).
+        """
         conn = self.get_connection()
         cursor = conn.cursor()
         try:
