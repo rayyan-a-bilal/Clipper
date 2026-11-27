@@ -1,0 +1,12 @@
+{
+  "tiktok": {
+    "margin_v": 450,
+    "safe_top": 220,
+    "safe_right": 150
+  },
+  "none": {
+    "margin_v": 0,
+    "safe_top": 0,
+    "safe_right": 0
+  }
+}

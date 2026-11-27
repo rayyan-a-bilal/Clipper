@@ -247,11 +247,21 @@ facecam
     "error": Optional[str]
 }
 
-## M9 additive contract changes (recorded 2026-12-01)
+## M9 additive contract changes (recorded 2026-12-01; M9a shipped 2026-12-02)
 
 Authority: docs/spec/m9.md decisions m9-1 … m9-11.
 All additions are optional with behaviour-preserving defaults.
 ClipPlan.schema_version stays 1. No existing field is renamed or removed.
+
+**M9a status (2026-12-02):** the models below are IMPLEMENTED in
+`src/clipper/models/m9_models.py` (re-exported from `clipper.models`); the
+ClipPlan additions live in `src/clipper/models/__init__.py`; data assets
+`assets/safe_zones.json` + `assets/styles/{default,compact}.json` are
+shipped. CPU-only tests: `tests/test_m9_models.py`,
+`tests/test_m9_assets.py`. Resolvers (`resolve_caption` / `resolve_layout` /`
+`effective_cut` / `dirty_set`) are M9b/M9c — NOT part of M9a. M9a judgment
+notes (safe-zone verification, ASS colour forms, `compact` preset values,
+snapshot typing) are recorded in docs/spec/m9.md.
 
 ClipPlan additions (old value for every field: ABSENT):
   caption_overrides: CaptionOverrides | None = None

@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "id": "default",
+  "label": "Default (current pipeline values)",
+  "caption": {
+    "enabled": true,
+    "hook_enabled": true,
+    "burn_in": "full",
+    "font": "Montserrat ExtraBold",
+    "size": 88,
+    "margin_v": 450,
+    "margin_l": 150,
+    "margin_r": 150,
+    "safe_top": 220,
+    "safe_right": 150,
+    "safe_zone_platform": "tiktok",
+    "max_words": 4,
+    "max_line_chars": 20,
+    "max_lines": 2,
+    "primary": "&HFFFFFF&",
+    "highlight": "&H00FFFF&",
+    "outline": 4,
+    "shadow": 0,
+    "bold": true,
+    "karaoke": true
+  },
+  "layout": {
+    "score_threshold": 0.6,
+    "face_follow_enabled": true,
+    "follow_persistence_min": 0.3
+  }
+}

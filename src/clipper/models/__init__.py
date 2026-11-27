@@ -7,6 +7,20 @@ from typing import Literal
 
 from pydantic import BaseModel
 
+# M9a — M9 QC-dashboard contracts (docs/spec/m9.md m9-1…m9-11). Defined in
+# their own module (pure pydantic, no circular imports) and re-exported
+# from `clipper.models` alongside everything else.
+from .m9_models import CaptionOverrides as CaptionOverrides  # noqa: F401
+from .m9_models import FontEntry as FontEntry  # noqa: F401
+from .m9_models import FontInventory as FontInventory  # noqa: F401
+from .m9_models import JobOverrides as JobOverrides  # noqa: F401
+from .m9_models import LayoutOverrides as LayoutOverrides  # noqa: F401
+from .m9_models import RenderHistory as RenderHistory  # noqa: F401
+from .m9_models import RenderVersion as RenderVersion  # noqa: F401
+from .m9_models import ResolvedCaption as ResolvedCaption  # noqa: F401
+from .m9_models import ResolvedLayout as ResolvedLayout  # noqa: F401
+from .m9_models import StylePreset as StylePreset  # noqa: F401
+
 
 # Basic data structures
 class Word(BaseModel):
@@ -127,6 +141,16 @@ class ClipPlan(BaseModel):
     status: Literal[
         "pending_qc", "approved", "rejected", "rendered", "exported"
     ] = "pending_qc"
+    # M9 (docs/spec/m9.md m9-1, m9-2, m9-4, m9-8, m9-9) — additive optional
+    # fields, defaults preserve current behaviour. NO existing field is
+    # renamed or removed; ClipPlansArtifact.schema_version stays 1.
+    caption_overrides: CaptionOverrides | None = None
+    layout_overrides: LayoutOverrides | None = None
+    manual_start: float | None = None
+    manual_end: float | None = None
+    forced: bool = False
+    force_reason: str | None = None
+    style_id: str | None = None
 
 class Job(BaseModel):
     job_id: str
