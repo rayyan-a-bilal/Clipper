@@ -259,7 +259,7 @@ ClipPlan additions live in `src/clipper/models/__init__.py`; data assets
 `assets/safe_zones.json` + `assets/styles/{default,compact}.json` are
 shipped. CPU-only tests: `tests/test_m9_models.py`,
 `tests/test_m9_assets.py`. Resolvers (`resolve_caption` / `resolve_layout` /`
-`effective_cut` / `dirty_set`) are M9b/M9c — NOT part of M9a. M9a judgment
+`effective_cut` / `dirty_set`) are **SHIPPED (M9b)** — `src/clipper/overrides.py` (pure, zero I/O; CPU-only tests `tests/test_m9b_resolution.py`; judgment notes **M9b-J1…J3** in docs/spec/m9.md `## M9b judgment notes`). M9a judgment
 notes (safe-zone verification, ASS colour forms, `compact` preset values,
 snapshot typing) are recorded in docs/spec/m9.md.
 
