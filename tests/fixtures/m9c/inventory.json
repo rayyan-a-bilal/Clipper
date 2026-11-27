@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "fonts": [
+    {
+      "file": "Montserrat-ExtraBold.ttf",
+      "family": "Montserrat ExtraBold",
+      "stem": "Montserrat-ExtraBold",
+      "fallback_used": false
+    },
+    {
+      "file": "Roboto-Regular.ttf",
+      "family": "Roboto-Regular",
+      "stem": "Roboto-Regular",
+      "fallback_used": true
+    }
+  ]
+}
