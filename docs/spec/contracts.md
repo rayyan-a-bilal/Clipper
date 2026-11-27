@@ -246,3 +246,25 @@ facecam
     "finished_at": Optional[str],
     "error": Optional[str]
 }
+
+## M9 additive contract changes (recorded 2026-12-01)
+
+Authority: docs/spec/m9.md decisions m9-1 … m9-11.
+All additions are optional with behaviour-preserving defaults.
+ClipPlan.schema_version stays 1. No existing field is renamed or removed.
+
+ClipPlan additions (old value for every field: ABSENT):
+  caption_overrides: CaptionOverrides | None = None
+  layout_overrides:  LayoutOverrides  | None = None
+  manual_start:      float | None = None
+  manual_end:        float | None = None
+  forced:            bool = False
+  force_reason:      str  | None = None
+  style_id:          str  | None = None
+
+New models: CaptionOverrides, LayoutOverrides, ResolvedCaption, ResolvedLayout,
+StylePreset, JobOverrides, FontInventory, FontEntry, RenderHistory, RenderVersion.
+Field lists, bounds, and literals: see m9.md m9-1, m9-8, m9-9, m9-3, m9-5.
+
+Unchanged: RenderArtifact, WordsArtifact, SentencesArtifact, ScoresArtifact,
+SelectionArtifact, CandidatesArtifact, ClipLayoutArtifact, JobReport, StageReport.

@@ -455,4 +455,15 @@ Branch: `fix-m0-db-init-m5-faces-import-test` (from the M8c tip `dc4b77a`). Two 
 - Acceptance (venv verified): **`python -m pytest -m "not gpu" -q` → 646 passed, 1 deselected (M6b GPU oracle), in 9.70s** (M8c baseline: 643 passed, ~26 min wall — the ~10s/test `Database`-init floor is gone; `tests/test_worker_plan.py` alone: 151s → 0.62s); **`python -m ruff check .` → All checks passed**; before/after `Database` timing evidence above
 - Scope respected: no M9 work, no stage/contract/config/constant changes (the M0 fix is init-internal only: same schema, same public API, same commit behavior); production DB files untouched (they already converge to version 3); no new dependencies
 
-**Current status: M0–M8 COMPLETE + both pre-existing fix cards (M0 db-init timeout, M5 faces import-hygiene test) FIXED. 646 passed, 1 deselected (M6b GPU oracle) in 9.70s (`pytest -m "not gpu"`), ruff clean. NEXT: the OPEN M9 design decisions in `docs/spec/m9.md` — user decides before M9 code.**
+**Current status: M0–M8 COMPLETE + both pre-existing fix cards (M0 db-init timeout, M5 faces import-hygiene test) FIXED. 646 passed, 1 deselected (M6b GPU oracle) in 9.70s (`pytest -m "not gpu"`), ruff clean. M9 DESIGN DECISIONS RECORDED 2026-12-01 (m9-1 … m9-11 in `docs/spec/m9.md` `## Decisions`, contract mirror in `docs/spec/contracts.md`; deps fastapi/uvicorn/jinja2 + vendored HTMX APPROVED; STILL NOT BUILT — the M9 task card is next and must follow those numbered decisions; see AGENTS.md M9 entry).**
+
+---
+
+## 2026-12-01 — M9 design decisions recorded (PRE-M9, docs-only)
+Branch: `m9-decisions-recorded` (from `5ed3997`). The user's M9 design decisions (from the user's Qwen4Max design session) are now recorded; **NO M9 code**.
+- `docs/spec/m9.md`: open items m9-x1 … m9-x8 resolved by the new **authoritative** `## Decisions (recorded 2026-12-01, pre-M9)` section — **m9-1 … m9-11** (typed per-clip `caption_overrides`/`layout_overrides` with bounds; manual trims with hard 15–75s rejection; font FAMILY inventory from `fc-scan`; force-select without LLM; rerender dirty-set invalidation + `final.v<N>.mp4` history (retain 3); metadata regen via existing M5c path; stack = FastAPI + Jinja2 + HTMX in `src/clipper/web/`, uvicorn + jinja2 + fastapi approved as NEW deps; style presets + 4-layer provenance resolver; two-tier preview; platform safe zones + burn-in modes). Pre-decision text retained as historical record
+- `docs/spec/contracts.md`: **M9 additive contract changes (recorded 2026-12-01)** section — 7 additive optional ClipPlan fields (schema_version stays 1) + 10 new models (`CaptionOverrides`, `LayoutOverrides`, `ResolvedCaption`, `ResolvedLayout`, `StylePreset`, `JobOverrides`, `FontInventory`, `FontEntry`, `RenderHistory`, `RenderVersion`); unchanged-contracts list; pure helpers named (`resolve_caption`, `resolve_layout`, `effective_cut`, `dirty_set`)
+- Acceptance (venv verified, docs-only task): `python -m pytest -m "not gpu" -q` → 646 passed, 1 deselected; `python -m ruff check .` → All checks passed
+- Scope respected: docs + progress records ONLY — no M9 code, no new pip deps installed yet, no `pip install`, M0–M8 untouched
+
+**Next (task card, not yet drafted):** M9 implementation per m9-1 … m9-11 — the card must list `fastapi`/`uvicorn`/`jinja2` + vendored HTMX as the new-dependency approval for the implementing session.
