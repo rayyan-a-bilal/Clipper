@@ -332,6 +332,22 @@ class RenderAdapter(Protocol):
         """M7c thumbnail: one still at t=1.0s of `final`; returns `dst`."""
         ...
 
+    def preview(
+        self,
+        mezzanine: str,
+        ass_path: str,
+        at_s: float,
+        dst: str,
+    ) -> str:
+        """M9e (m9-10 Tier 2): burn the real ASS onto ONE frame of the
+        EXISTING mezzanine at clip-relative `at_s` — the canonical m9-10
+        command: `ffmpeg -ss {at_s} -i {mezzanine} -vf
+        ass={ass_path}:fontsdir={fonts} -frames:v 1 {dst}`.
+
+        Reuses the mezzanine; NEVER (re-)renders video. Returns `dst`.
+        """
+        ...
+
 
 class FFmpegRenderAdapter:
     """NVDEC + NVENC mezzanine / audio extraction (subprocess, GPU0).
@@ -829,6 +845,44 @@ class FFmpegRenderAdapter:
         self._run_ffmpeg(self.thumbnail_command(final, dst))
         return os.path.abspath(dst)
 
+    # -- M9e (m9-10 Tier 2): authoritative single-frame preview ----------
+
+    def preview_command(
+        self, mezzanine: str, ass_path: str, at_s: float, dst: str
+    ) -> list[str]:
+        """Exact m9-10 Tier-2 preview command (docs/spec/m9.md m9-10):
+
+        `ffmpeg -ss {at_s} -i {mezzanine} -vf
+        ass={ass_path}:fontsdir={assets/fonts} -frames:v 1 {dst}`
+        """
+        return [
+            "ffmpeg",
+            "-ss", f"{float(at_s):.3f}",
+            "-i", mezzanine,
+            "-vf", f"ass={ass_path}:fontsdir={_fonts_dir()}",
+            "-frames:v", "1",
+            dst,
+        ]
+
+    def preview(
+        self,
+        mezzanine: str,
+        ass_path: str,
+        at_s: float,
+        dst: str,
+    ) -> str:
+        """One authoritative frame (M9e, m9-10): real ASS burned onto one
+        frame of the EXISTING mezzanine. NO video re-render — the inputs
+        must already exist (a missing one is a clean `MediaError`; the
+        service layer is expected to have checked staleness first)."""
+        if not os.path.exists(mezzanine):
+            raise MediaError(f"Mezzanine file does not exist: {mezzanine}")
+        if not os.path.exists(ass_path):
+            raise MediaError(f"Captions file does not exist: {ass_path}")
+        Path(dst).parent.mkdir(parents=True, exist_ok=True)
+        self._run_ffmpeg(self.preview_command(mezzanine, ass_path, at_s, dst))
+        return os.path.abspath(dst)
+
 
 class FixtureRenderAdapter:
     """CPU-only placeholder adapter (tests / no-GPU wiring; M7b).
@@ -942,6 +996,12 @@ class FixtureRenderAdapter:
     def make_thumbnail(self, final: str, dst: str) -> str:
         Path(dst).parent.mkdir(parents=True, exist_ok=True)
         Path(dst).write_text("fixture thumbnail (M7c)")
+        return os.path.abspath(dst)
+
+    def preview(self, mezzanine: str, ass_path: str, at_s: float, dst: str) -> str:
+        """Placeholder preview frame (M9e m9-10): one file, no ffmpeg/GPU."""
+        Path(dst).parent.mkdir(parents=True, exist_ok=True)
+        Path(dst).write_text("fixture preview frame (M9e m9-10)")
         return os.path.abspath(dst)
 
 

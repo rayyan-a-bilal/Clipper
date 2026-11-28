@@ -1095,3 +1095,56 @@ def test_fixture_make_thumbnail_placeholder(tmp_path):
 def test_protocol_conformance():
     assert isinstance(FFmpegRenderAdapter(), RenderAdapter)
     assert isinstance(FixtureRenderAdapter(), RenderAdapter)
+
+
+# -- M9e (m9-10 Tier 2): authoritative single-frame preview -----------------
+# Contract: docs/spec/m9.md m9-10 (canonical command) + M9e-J5.
+
+
+def test_preview_command_exact():
+    """The canonical m9-10 command, verbatim (fontsdir = assets/fonts)."""
+    from clipper.adapters.render import _fonts_dir
+    cmd = FFmpegRenderAdapter().preview_command(
+        "mezzanine.mp4", "captions.ass", 3.0, "preview.png"
+    )
+    assert cmd == [
+        "ffmpeg",
+        "-ss", "3.000",
+        "-i", "mezzanine.mp4",
+        "-vf", f"ass=captions.ass:fontsdir={_fonts_dir()}",
+        "-frames:v", "1",
+        "preview.png",
+    ]
+
+
+def test_preview_runs_canonical_command_and_returns_dst(tmp_path, monkeypatch):
+    adapter = FFmpegRenderAdapter()
+    mezz = _touch(tmp_path, "mezzanine.mp4")
+    ass = _touch(tmp_path, "captions.ass")
+    dst = str(tmp_path / "preview.png")
+    fake = FakeFFmpeg()
+    install_fake(monkeypatch, fake)
+    out = adapter.preview(mezz, ass, 2.5, dst)
+    assert out == Path(dst).resolve().as_posix()
+    assert len(fake.calls) == 1
+    assert fake.calls[0] == adapter.preview_command(mezz, ass, 2.5, dst)
+
+
+def test_preview_missing_inputs_raise_clean_media_error(tmp_path):
+    with pytest.raises(MediaError, match="Mezzanine file does not exist"):
+        FFmpegRenderAdapter().preview(
+            "/nonexistent/mezzanine.mp4", "captions.ass", 1.0, "/tmp/p.png"
+        )
+    mezz = _touch(tmp_path, "mezzanine.mp4")
+    with pytest.raises(MediaError, match="Captions file does not exist"):
+        FFmpegRenderAdapter().preview(
+            mezz, "/nonexistent/captions.ass", 1.0, "/tmp/p.png"
+        )
+
+
+def test_fixture_preview_placeholder(tmp_path):
+    adapter = FixtureRenderAdapter()
+    dst = str(tmp_path / "clip" / "preview.png")
+    out = adapter.preview("no-mez", "no-ass", 1.0, dst)
+    assert Path(dst).exists()
+    assert out == Path(dst).resolve().as_posix()

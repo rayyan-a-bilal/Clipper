@@ -6,10 +6,19 @@ in a later M9 milestone. All models are plain pydantic v2, additive to the
 existing M0–M8 contracts. Mirror: docs/spec/contracts.md.
 """
 
+from __future__ import annotations
+
 import re
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 from pydantic import BaseModel, ConfigDict, field_validator
+
+if TYPE_CHECKING:
+    # M9-12 (docs/spec/m9.md): only for the `RenderVersion.plan_snapshot`
+    # annotation — resolved AFTER `clipper.models` defines `ClipPlan` via
+    # `RenderVersion.model_rebuild(...)` (m9_models.py is imported by
+    # clipper.models, so a runtime import here would be circular).
+    from clipper.models import ClipPlan
 
 # m9-1: colours stay ASS-native BGR hex, validated by regex, no hex
 # conversion in v1. ASS allows both the 6-digit `&HBBGGRR&` and the
@@ -242,7 +251,10 @@ class RenderVersion(BaseModel):
     `resolved_caption` / `resolved_layout` are the RESOLVED snapshot used
     to render version `n` (the card types them as the override models of
     record, per m9-5 "each version stores its resolved override snapshot
-    + dirty set")."""
+    + dirty set"), and `plan_snapshot` (m9-12) is the FULL `ClipPlan` as
+    rendered — the recorded `before` side of the next `dirty_set` for
+    `clipper rerender CLIP_ID` (default absent: old entries stay valid).
+    """
 
     n: int
     final_path: str
@@ -251,6 +263,7 @@ class RenderVersion(BaseModel):
     resolved_caption: CaptionOverrides | None = None
     resolved_layout: LayoutOverrides | None = None
     render_seconds: float = 0.0
+    plan_snapshot: ClipPlan | None = None  # m9-12 (2026-12-02)
 
 
 class RenderHistory(BaseModel):

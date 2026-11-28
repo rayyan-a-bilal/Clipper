@@ -8,6 +8,7 @@ from pathlib import Path
 import typer
 
 from . import qc_actions, worker
+from . import rerender as rerender_mod
 from .adapters.media import get_adapter
 from .config import Config
 from .db import Database
@@ -400,13 +401,96 @@ def reject(
 
 @app.command()
 def rerender(
-    clip_id: str = typer.Option(..., help="Clip ID to re-render"),
+    clip_id: str = typer.Argument(
+        ..., help="Clip ID to re-render (M9e, m9-5)"
+    ),
+    relayout: bool = typer.Option(
+        False,
+        "--relayout",
+        help=(
+            "Force a layout re-run for this clip (otherwise only when the "
+            "layout overrides changed)"
+        ),
+    ),
+    cpu_render: bool = typer.Option(
+        False,
+        "--cpu-render",
+        help="CPU render path (loud warning; explicit only, no silent substitution)",
+    ),
 ):
     """
-    Re-render a clip.
+    Re-render ONE clip with dirty-set invalidation (M9e, m9-5).
+
+    Caption-only change reuses the mezzanine/audio; a trim re-renders
+    mezzanine + audio; a layout change re-runs layout first. Versions are
+    kept as final.v<N>.mp4 (last 3) and final.mp4 is the latest.
     """
-    typer.echo("Not implemented until M10")
-    raise typer.Exit(0)
+    try:
+        config = get_config()
+        db = get_db(config)
+        conn = db.get_connection()
+        try:
+            result = rerender_mod.rerender_clip(
+                clip_id, config, conn, relayout=relayout, cpu_render=cpu_render
+            )
+        finally:
+            conn.close()
+        if result["no_op"]:
+            typer.echo(
+                f"{clip_id}: nothing changed since the last render — no-op "
+                f"(final.mp4 is current: {result['final_path']})"
+            )
+        else:
+            dirty = ", ".join(result["dirty"]) or "-"
+            typer.echo(
+                f"{clip_id}: rendered v{result['version']} "
+                f"(dirty: {dirty}; relayout: {result['relayout']})"
+            )
+            typer.echo(f"  final: {result['final_path']}")
+            typer.echo(f"  versioned: {result['versioned_path']}")
+            typer.echo(f"  thumbnail: {result['thumbnail_path']}")
+            if result["removed_versions"]:
+                typer.echo(
+                    "  pruned: " + ", ".join(result["removed_versions"])
+                )
+        raise typer.Exit(0)
+    except typer.Exit:
+        raise
+    except Exception as e:
+        typer.echo(f"Error: {e}")
+        raise typer.Exit(1) from e
+
+
+@app.command()
+def preview(
+    clip_id: str = typer.Argument(..., help="Clip ID to preview"),
+    at: float = typer.Option(
+        ..., "--at", help="Seconds from job start (clamped into the effective cut)"
+    ),
+):
+    """
+    Burn the real ASS onto ONE frame of the mezzanine (M9e, m9-10 tier 2).
+
+    Writes clips/<clip_id>/preview.png (overwritten each call, not
+    versioned). Refuses with a concrete reason if the mezzanine is stale
+    (run `clipper rerender CLIP_ID` first).
+    """
+    try:
+        config = get_config()
+        db = get_db(config)
+        conn = db.get_connection()
+        try:
+            path = rerender_mod.preview_frame(clip_id, at, config, conn)
+        finally:
+            conn.close()
+        typer.echo(str(path))
+        raise typer.Exit(0)
+    except typer.Exit:
+        raise
+    except Exception as e:
+        typer.echo(f"Error: {e}")
+        raise typer.Exit(1) from e
+
 
 @app.command()
 def export(

@@ -263,6 +263,20 @@ shipped. CPU-only tests: `tests/test_m9_models.py`,
 notes (safe-zone verification, ASS colour forms, `compact` preset values,
 snapshot typing) are recorded in docs/spec/m9.md.
 
+**M9e change (recorded 2026-12-02, m9-12):** `RenderVersion` gains one
+additive field — `plan_snapshot: ClipPlan | None = None` — the FULL
+`ClipPlan` (as rendered) for that version. It is the recorded `before`
+side of the next `dirty_set(before, after)` for `clipper rerender
+CLIP_ID` (m9-5), so the dirty set is computable after the edit session
+ends. Old `render_history.json` entries stay valid with it ABSENT (default
+`None`); `ClipPlan` itself is unchanged, and no existing
+`RenderVersion` field is renamed, removed or re-typed. M9e also ships the
+implementation: `src/clipper/rerender.py` (`rerender_clip` /
+`preview_frame`), the additive `RenderAdapter.preview` method
+(`adapters/render.py`, the m9-10 Tier-2 command), and the CLI `rerender`
+/ `preview` commands; CPU-only tests `tests/test_m9e_rerender.py` (with
+`tests/test_render_adapter.py` additions for `preview`).
+
 ClipPlan additions (old value for every field: ABSENT):
   caption_overrides: CaptionOverrides | None = None
   layout_overrides:  LayoutOverrides  | None = None

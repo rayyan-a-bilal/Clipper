@@ -189,3 +189,11 @@ from .vision_artifacts import RegionTrack as RegionTrack  # noqa: E402
 from .vision_artifacts import VisionSegmentInfo as VisionSegmentInfo  # noqa: E402
 from .worker_artifacts import JobReport as JobReport  # noqa: E402
 from .worker_artifacts import StageReport as StageReport  # noqa: E402
+
+# M9-12 (docs/spec/m9.md): resolve the `RenderVersion.plan_snapshot`
+# forward reference once `ClipPlan` exists in THIS module — `m9_models.py`
+# is imported above and cannot import `ClipPlan` at runtime (circular),
+# so its `TYPE_CHECKING`-only import leaves the annotation deferred until
+# this explicit rebuild (keeps `RenderVersion` fully usable for
+# validation/dumping; old entries stay valid with the field ABSENT).
+RenderVersion.model_rebuild(_types_namespace={"ClipPlan": ClipPlan})
