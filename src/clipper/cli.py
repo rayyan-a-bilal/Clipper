@@ -7,7 +7,7 @@ from pathlib import Path
 
 import typer
 
-from . import worker
+from . import qc_actions, worker
 from .adapters.media import get_adapter
 from .config import Config
 from .db import Database
@@ -353,23 +353,50 @@ def ls(
 
 @app.command()
 def approve(
-    clip_id: str = typer.Option(..., help="Clip ID to approve"),
+    clip_id: str = typer.Argument(..., help="Clip ID to approve"),
 ):
     """
-    Approve a clip for final export.
+    Approve a clip for final export (M9d, m9-5).
     """
-    typer.echo("Not implemented until M10")
-    raise typer.Exit(0)
+    try:
+        config = get_config()
+        db = get_db(config)
+        conn = db.get_connection()
+        try:
+            plan = qc_actions.approve(clip_id, config, conn)
+        finally:
+            conn.close()
+        typer.echo(f"{clip_id}: {plan.status}")
+        raise typer.Exit(0)
+    except typer.Exit:
+        raise
+    except Exception as e:
+        typer.echo(f"Error: {e}")
+        raise typer.Exit(1) from e
+
 
 @app.command()
 def reject(
-    clip_id: str = typer.Option(..., help="Clip ID to reject"),
+    clip_id: str = typer.Argument(..., help="Clip ID to reject"),
 ):
     """
-    Reject a clip.
+    Reject a clip (M9d, m9-5).
     """
-    typer.echo("Not implemented until M10")
-    raise typer.Exit(0)
+    try:
+        config = get_config()
+        db = get_db(config)
+        conn = db.get_connection()
+        try:
+            plan = qc_actions.reject(clip_id, config, conn)
+        finally:
+            conn.close()
+        typer.echo(f"{clip_id}: {plan.status}")
+        raise typer.Exit(0)
+    except typer.Exit:
+        raise
+    except Exception as e:
+        typer.echo(f"Error: {e}")
+        raise typer.Exit(1) from e
 
 @app.command()
 def rerender(
@@ -382,12 +409,65 @@ def rerender(
     raise typer.Exit(0)
 
 @app.command()
-def export():
+def export(
+    job_id: str = typer.Argument(..., help="Job ID whose approved clips to export"),
+):
     """
-    Export final clips.
+    Export a job's approved clips to data/exports/<job_id>/ (M9d, m9-5).
     """
-    typer.echo("Not implemented until M10")
-    raise typer.Exit(0)
+    try:
+        config = get_config()
+        db = get_db(config)
+        conn = db.get_connection()
+        try:
+            paths = qc_actions.export_job(job_id, config, conn)
+        finally:
+            conn.close()
+        out_dir = config.resolved_data_dir / "exports" / job_id
+        if not paths:
+            typer.echo(f"No approved clips to export for job {job_id}")
+        else:
+            typer.echo(f"Exported {len(paths)} file(s) to {out_dir}")
+            for path in paths:
+                typer.echo(f"  {path}")
+        raise typer.Exit(0)
+    except typer.Exit:
+        raise
+    except Exception as e:
+        typer.echo(f"Error: {e}")
+        raise typer.Exit(1) from e
+
+
+@app.command()
+def force_select(
+    cand_id: str = typer.Argument(
+        ..., help="Candidate ID to force-select (no LLM)"
+    ),
+    reason: str | None = typer.Option(
+        None, "--reason", help="Free-text reason captured on the plan"
+    ),
+):
+    """
+    Force-select a candidate as a clip WITHOUT any LLM call (M9d, m9-4).
+    """
+    try:
+        config = get_config()
+        db = get_db(config)
+        conn = db.get_connection()
+        try:
+            plan = qc_actions.force_select(cand_id, reason, config, conn)
+        finally:
+            conn.close()
+        typer.echo(f"{plan.clip_id}: forced selection from candidate {cand_id}")
+        typer.echo(f"status: {plan.status}")
+        if plan.force_reason:
+            typer.echo(f"reason: {plan.force_reason}")
+        raise typer.Exit(0)
+    except typer.Exit:
+        raise
+    except Exception as e:
+        typer.echo(f"Error: {e}")
+        raise typer.Exit(1) from e
 
 @app.command()
 def report(
